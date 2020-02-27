@@ -61,6 +61,9 @@ class b3Tax():
             raise
 
     def objectify_months(self, line, stock_updated_instance):
+
+        # Criar um objeto para cada mes, no esquema de stock.
+
         #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
         month = self.mm[line['year_month_id']]
         month['dt'] = line['dt']
@@ -140,15 +143,10 @@ class b3Tax():
         When the total amount sold on one month is less than R$20,000.00
         no tax are applied over gain
         """
-        if current_month['month_sell'] > 20000:
-            return True
-        return False
+        return True if current_month['month_sell'] > 20000 else False
 
-
-    def tax_calc(self, month, final_balance):
-        month['tax'] = {'final_balance':final_balance,
-                            'tax_amount': final_balance * 0.15}
-
+    def tax_calc(self, final_balance):
+        return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
 
     def month_add_detail(self):
         """
@@ -183,7 +181,7 @@ class b3Tax():
                     final_balance = balance_current_month + months[month]['cumulate_loss']
                     if final_balance > 0:
                         months[month]['cumulate_loss'] = 0
-                        self.tax_calc(months[month], final_balance)
+                        months[month]['tax'] = self.tax_calc(final_balance)
                     elif final_balance <= 0:
                         months[month]['cumulate_loss'] = final_balance
 
