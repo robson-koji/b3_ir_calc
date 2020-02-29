@@ -7,28 +7,23 @@ from datetime import datetime, timedelta, date
 from collections import defaultdict
 
 
-class b3Tax():
-    def __init__(self, corretora):
-        self.corretora = corretora
-        self.mm = monthsGroup()
+class ObjectifyData():
+    """
+    Opens CSV file and objetify to a sequence of months and a list of stocks
+    """
+    def __init__(self, broker):
+        self.broker = broker
+        self.mm = Months()
         self.stocks = {}
 
     def two_digits_month(self, month):
-        """ four digits year plus two digits months for all keys, allows order keys """
+        """
+        Four digits year plus two digits months for use in dict keys,
+        to allows order keys
+        """
         if month < 10:
             month = "0%d" % (month)
         return month
-
-    def subtract_one_month(self, month):
-        """ receives current month, returns the key of previous active month """
-        try:
-            months = self.mm
-            month_index = months.keys().index(month)
-            if month_index:
-                return months.keys()[month_index - 1]
-            return None
-        except:
-            raise
 
     def read_line(self, line):
         # line = [10/07/2019,1-Bovespa,C,VIS,TAEE11 UNT N2,,100,"28,69",2869,D]
@@ -60,23 +55,6 @@ class b3Tax():
             print e
             raise
 
-    def objectify_months(self, line, stock_updated_instance):
-
-        # Criar um objeto para cada mes, no esquema de stock.
-
-        #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
-        month = self.mm[line['year_month_id']]
-        month['dt'] = line['dt']
-
-        if (line['buy_sell'] == 'C'):
-            month['month_buy'] += line['value']
-        elif (line['buy_sell'] == 'V'):
-            month['month_sell'] += line['value']
-        if stock_updated_instance is not None:
-            month['operations'].append(stock_updated_instance)
-
-
-
     def objectify_stock(self, line):
         """
         Receives a csv line in dict format and create a stock object.
@@ -85,7 +63,7 @@ class b3Tax():
         """
         # Create or get instance of a stock account
         # It is populating self.stocks, a still not used dict.
-        stock = self.stocks.setdefault(line['stock'], stockCheckingAccount(line['stock']))
+        stock = self.stocks.setdefault(line['stock'], StockCheckingAccount(line['stock']))
 
         # Set operation attributes
         stock.start_operation(**line)
@@ -108,7 +86,7 @@ class b3Tax():
         Build months object and stocks objects.
         """
         try:
-            file_path = 'files/%s.csv' % (self.corretora)
+            file_path = 'files/%s.csv' % (self.broker)
             with open(file_path) as file_handler:
                 csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
                 next(csv_reader, None)
@@ -123,27 +101,79 @@ class b3Tax():
                         #     continue
                         stock_updated_instance = self.objectify_stock(line)
                         self.objectify_months(line, stock_updated_instance)
+
                     except Exception as e:
                         raise
         except (IOError, OSError):
             print("Error opening / processing file")
         except StopIteration:
             pass
-        #return self.mm
+        return self.mm
+
+
+    def objectify_months(self, line, stock_updated_instance):
+        #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
+        month = line['year_month_id']
+        month_dict = self.mm[month]
+
+        # Set operation attributes
+        self.mm.month_populate(month, stock_updated_instance, **line)
+
+
+class Months():
+    def __init__(self):
+        self._months = {}
+
+    def __getitem__(self, month):
+        stocks = {'operations':[], 'totalization':{}}
+        return self._months.setdefault(month, {'dt':datetime,
+                                                'month_buy':0, 'month_sell':0,
+                                                'month_gain':0, 'month_loss':0,
+                                                'cumulate_gain':0, 'cumulate_loss':0,
+                                                'operations':[], 'tax':{}})
+
+    def __iter__(self):
+        return iter(self._months)
+
+    def get_month(self, month):
+        return self._months[month]
+
+    def keys(self):
+        return sorted(self._months.keys())
+
+    def month_populate(self, month, stock_updated_instance, **line):
+        month_dict = self._months[month]
+        month_dict['dt'] = line['dt']
+        if (line['buy_sell'] == 'C'):
+            month_dict['month_buy'] += line['value']
+        elif (line['buy_sell'] == 'V'):
+            month_dict['month_sell'] += line['value']
+        if stock_updated_instance is not None:
+            month_dict['operations'].append(stock_updated_instance)
+
+    def subtract_one_month(self, this_month):
+        """ receives current month, returns the key of previous active month """
+        self._months
+        try:
+            this_month_index = self.keys().index(this_month)
+            if this_month_index:
+                return self.keys()[this_month_index - 1]
+            return None
+        except:
+            raise
 
     def cumulate_loss(self, this_month):
-        months = self.mm
         previous_month = self.subtract_one_month(this_month)
-        months[this_month]['cumulate_loss'] = months[this_month]['month_loss']
+        self._months[this_month]['cumulate_loss'] = self._months[this_month]['month_loss']
         if previous_month:
-            months[this_month]['cumulate_loss'] += months[previous_month]['cumulate_loss']
+            self._months[this_month]['cumulate_loss'] += self._months[previous_month]['cumulate_loss']
 
-    def threshold_exempt(self, current_month):
+    def threshold_exempt(self, this_month):
         """
         When the total amount sold on one month is less than R$20,000.00
         no tax are applied over gain
         """
-        return True if current_month['month_sell'] > 20000 else False
+        return True if self._months[this_month]['month_sell'] > 20000 else False
 
     def tax_calc(self, final_balance):
         return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
@@ -153,47 +183,46 @@ class b3Tax():
         Add gain, loss for months.
         Calculate final balance and due tax.
         """
-        months = self.mm
-        for month in months.keys():
-            print "\n\n"
-            print month
+        # import pdb; pdb.set_trace()
+        for month in self.keys():
+            # print "\n\n"
+            # print month
 
             balance_current_month = 0
-            # if months[month]['month_sell'] > 20000:
-            print "%s Total vendas : %s" % (month, months[month]['month_sell'])
-            for operation in months[month]['operations']:
+            # if self._months[month]['month_sell'] > 20000:
+            # print "%s Total vendas : %s" % (month, self._months[month]['month_sell'])
+            for operation in self._months[month]['operations']:
                 if operation['buy_sell'] == 'V':
                     if operation['profit']:
                         balance_current_month += operation['profit']
                     elif operation['loss']:
                         balance_current_month -= operation['loss']
 
-                print operation
+                # print operation
             if balance_current_month > 0:
-                months[month]['month_gain'] =  balance_current_month
+                self._months[month]['month_gain'] =  balance_current_month
             elif balance_current_month < 0:
-                months[month]['month_loss'] =  balance_current_month
+                self._months[month]['month_loss'] =  balance_current_month
 
             self.cumulate_loss(month)
 
-            if self.threshold_exempt(months[month]):
+            if self.threshold_exempt(month):
                 if balance_current_month > 0:
-                    final_balance = balance_current_month + months[month]['cumulate_loss']
+                    final_balance = balance_current_month + self._months[month]['cumulate_loss']
                     if final_balance > 0:
-                        months[month]['cumulate_loss'] = 0
-                        months[month]['tax'] = self.tax_calc(final_balance)
+                        self._months[month]['cumulate_loss'] = 0
+                        self._months[month]['tax'] = self.tax_calc(final_balance)
                     elif final_balance <= 0:
-                        months[month]['cumulate_loss'] = final_balance
+                        self._months[month]['cumulate_loss'] = final_balance
 
-            print balance_current_month
-            print months[month]['month_gain']
-            print months[month]['month_loss']
-            print months[month]['cumulate_loss']
-            print months[month]['tax']
+            # print balance_current_month
+            # print self._months[month]['month_gain']
+            # print self._months[month]['month_loss']
+            # print self._months[month]['cumulate_loss']
+            # print self._months[month]['tax']
 
 
-
-class stockCheckingAccount():
+class StockCheckingAccount():
     def __init__(self, name):
         self.name = name
         self.qt_total = 0
@@ -244,31 +273,19 @@ class stockCheckingAccount():
                     .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
 
 
-class monthsGroup():
-    def __init__(self):
-        self._months = {}
-
-    def __getitem__(self, key):
-        stocks = {'operations':[], 'totalization':{}}
-        return self._months.setdefault(key, {'dt':datetime,
-                                                'month_buy':0, 'month_sell':0,
-                                                'month_gain':0, 'month_loss':0,
-                                                'cumulate_gain':0, 'cumulate_loss':0,
-                                                'operations':[], 'tax':{}})
-
-    def __setitem__(self, key, value):
-        self._months[key] = value
-
-    def __iter__(self):
-        return iter(self._months)
-
-    def keys(self):
-        return sorted(self._months.keys())
-
-
 
 
 if __name__ == "__main__":
-    b3_tax_obj = b3Tax('mirae')
-    b3_tax_obj.file2object()
-    b3_tax_obj.month_add_detail()
+    b3_tax_obj = ObjectifyData('mirae')
+    months = b3_tax_obj.file2object()
+    months.month_add_detail()
+    months_keys = months.keys()
+    #import pdb; pdb.set_trace()
+    for month in months_keys:
+        month_data = months.get_month(month)
+        print
+        print 'Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell'])
+        print 'Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss'])
+
+        if month_data['tax']:
+            print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
