@@ -11,8 +11,9 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, broker):
-        self.broker = broker
+    def __init__(self, file, file_path="files/"):
+        self.file_path = file_path
+        self.file = file
         self.mm = Months()
         self.stocks = {}
 
@@ -86,7 +87,7 @@ class ObjectifyData():
         Build months object and stocks objects.
         """
         try:
-            file_path = 'files/%s.csv' % (self.broker)
+            file_path = '%s%s' % (self.file_path, self.file)
             with open(file_path) as file_handler:
                 csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
                 next(csv_reader, None)

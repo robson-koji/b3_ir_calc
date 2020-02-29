@@ -1,4 +1,5 @@
 files/*
+!files/test_sample/
 
 
 
