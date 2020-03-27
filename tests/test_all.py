@@ -1,9 +1,8 @@
 import sys, os
 import unittest
-
 from datetime import datetime
 
-from ..ir_calc import ObjectifyData, Months, StockCheckingAccount
+from b3_ir_calc.ir_calc import ObjectifyData, Months, StockCheckingAccount
 
 
 class ObjectifyDataTest(unittest.TestCase):
