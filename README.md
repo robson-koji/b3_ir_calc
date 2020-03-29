@@ -16,3 +16,11 @@ There is a sample CSV file with dummy data included for tests.
 Download with pip. **Still not usefull, because it is a standalone script** 
 
 pip install git+https://gitlab.com/bv_fapesp/django_excel_csv#egg=django_excel_csv
+
+## TODO
+* Sort by date before processing
+* Sort buy/sell - buy first for workflow consistency
+* Asset name change (sometimes it change)
+* Daytrade
+* Subtract broker fees
+* Options
