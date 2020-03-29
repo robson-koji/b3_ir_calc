@@ -7,7 +7,7 @@ setup(
     name="b3_ir_calc", # Replace with your own username
     version="0.0.1",
     author="Koji",
-    author_email="rbsnkjmr@gmail.com",
+    author_email="robson.koji@gmail.com",
     description="B3 income tax calculator",
     long_description=long_description,
     long_description_content_type="text/markdown",

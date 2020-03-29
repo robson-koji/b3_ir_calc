@@ -1,5 +1,11 @@
 # coding: utf-8
 
+"""
+This is only valid for Brazilian Real and B3 (Brazil stock exchange).
+Todo localization
+"""
+
+
 import csv
 import copy
 from decimal import *
@@ -35,10 +41,12 @@ class ObjectifyData():
             year_month_id = "%d%s" % (int(dt.year), month)
             year_month_id = int(year_month_id)
             stock = line[4].split()[0]
-            qt = int(line[6])
-            unit_price = Decimal(line[7].replace(',', '.').replace('"', ''))
+            qt = int(line[6].replace('.', ''))
+
+            unit_price = Decimal(line[7].replace('.', '').replace(',', '.').replace('"', ''))
             unit_price = round(unit_price, 2)
-            value = Decimal(line[8].replace(',', '.').replace('"', ''))
+
+            value = Decimal(line[8].replace('.', '').replace(',', '.').replace('"', ''))
             value = round(value, 2)
             buy_sell = line[2]
 
@@ -277,7 +285,7 @@ class StockCheckingAccount():
 
 
 if __name__ == "__main__":
-    b3_tax_obj = ObjectifyData('mirae')
+    b3_tax_obj = ObjectifyData('mirae.csv', '/home/robson/invest/')
     months = b3_tax_obj.file2object()
     months.month_add_detail()
     months_keys = months.keys()
