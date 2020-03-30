@@ -6,8 +6,7 @@ Todo localization
 """
 
 
-import csv
-import copy
+import csv, re, copy
 from decimal import *
 from datetime import datetime, timedelta, date
 from collections import defaultdict
@@ -22,6 +21,8 @@ class ObjectifyData():
         self.file = file
         self.mm = Months()
         self.stocks = {}
+        self.running_options = RunningOptions()
+
 
     def two_digits_month(self, month):
         """
@@ -64,6 +65,68 @@ class ObjectifyData():
             print e
             raise
 
+
+    def is_stock(self, asset):
+        """ Whether is stock or option """
+        """ There is a specific field for this on the csv """
+        pattern = '^[A-Z]{4}\d+$'
+        regexp = re.compile(pattern, re.IGNORECASE)
+        if regexp.search(asset):
+            return True
+        return False
+
+
+
+    def file2object(self):
+        """
+        Process file line by line using the file's returned iterator
+        to permit working with large files.
+        Build months object and stocks objects.
+        """
+        try:
+            file_path = '%s%s' % (self.file_path, self.file)
+            with open(file_path) as file_handler:
+                csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
+                next(csv_reader, None)
+                csv_reader = reversed(list(csv_reader))
+
+                while True:
+                    try:
+                        line = next(csv_reader)
+                        line = self.read_line(line)
+
+                        # if not 'KLBN11' in line['stock']:
+                        #     continue
+
+                        # Objectify stock and months
+                        stock_updated_instance = self.objectify_stock(line)
+                        self.objectify_months(line, stock_updated_instance)
+
+                        # Check month changes, to verify option expiration (OTM)
+                        if not line['year_month_id'] in self.mm:
+                            if self.running_options:
+                                self.running_options.chk_running_options()
+
+                        # Create or remove a running option.
+                        if not self.is_stock(line['stock']): # If is option
+                            if stock_updated_instance['qt_total'] == 0:
+                                del self.running_options[line['stock']]
+                            else:
+                                self.running_options[line['stock']] = stock_updated_instance
+
+                    except Exception as e:
+                        raise
+
+            # After the last operation check if there are OTM options
+            self.running_options.chk_running_options()
+
+        except (IOError, OSError):
+            print("Error opening / processing file")
+        except StopIteration:
+            pass
+        return self.mm
+
+
     def objectify_stock(self, line):
         """
         Receives a csv line in dict format and create a stock object.
@@ -88,38 +151,6 @@ class ObjectifyData():
         return cp_stock
 
 
-    def file2object(self):
-        """
-        Process file line by line using the file's returned iterator
-        to permit working with large files.
-        Build months object and stocks objects.
-        """
-        try:
-            file_path = '%s%s' % (self.file_path, self.file)
-            with open(file_path) as file_handler:
-                csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
-                next(csv_reader, None)
-                csv_reader = reversed(list(csv_reader))
-
-                while True:
-                    try:
-                        line = next(csv_reader)
-                        line = self.read_line(line)
-
-                        # if not 'KLBN11' in line['stock']:
-                        #     continue
-                        stock_updated_instance = self.objectify_stock(line)
-                        self.objectify_months(line, stock_updated_instance)
-
-                    except Exception as e:
-                        raise
-        except (IOError, OSError):
-            print("Error opening / processing file")
-        except StopIteration:
-            pass
-        return self.mm
-
-
     def objectify_months(self, line, stock_updated_instance):
         #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
         month = line['year_month_id']
@@ -127,6 +158,39 @@ class ObjectifyData():
 
         # Set operation attributes
         self.mm.month_populate(month, stock_updated_instance, **line)
+
+
+
+class RunningOptions():
+    def __init__(self):
+        self._running_options = {}
+
+    def __iter__(self):
+        return iter(self._running_options)
+
+    def __getitem__(self, option):
+        return self._running_options[option]
+
+    def __setitem__(self, option, updated_instance):
+        self._running_options[option] = updated_instance
+
+    def __delitem__(self, option):
+        self._running_options.pop(option, None)
+
+    def expired_otm(self, option):
+        pass
+        Virou poh, entra como prejuizo.
+
+
+    def chk_running_options(self):
+        print self._running_options
+        import pdb; pdb.set_trace()
+
+        Fazer aqui. Verificar a data para o pohs loop do csv
+
+        pass
+
+
 
 
 class Months():
@@ -231,6 +295,10 @@ class Months():
             # print self._months[month]['tax']
 
 
+
+
+
+
 class StockCheckingAccount():
     def __init__(self, name):
         self.name = name
@@ -284,12 +352,24 @@ class StockCheckingAccount():
 
 
 
+
+class OptionCheckingAccount(StockCheckingAccount):
+    """ Not in use """
+    CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
+    PUT = ['M','N','O','P','Q','R','S','T','U','V','W','X']
+
+    def put_or_call(self):
+        print self.name
+        import pdb; pdb.set_trace()
+
+
+
 if __name__ == "__main__":
     b3_tax_obj = ObjectifyData('mirae.csv', '/home/robson/invest/')
     months = b3_tax_obj.file2object()
     months.month_add_detail()
     months_keys = months.keys()
-    #import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
     for month in months_keys:
         month_data = months.get_month(month)
         print
