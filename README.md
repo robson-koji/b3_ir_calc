@@ -25,3 +25,4 @@ pip install git+https://gitlab.com/bv_fapesp/django_excel_csv#egg=django_excel_c
 * Subtract broker fees
 * Options
 * Monthly statement
+* Short sale
