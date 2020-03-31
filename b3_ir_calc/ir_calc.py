@@ -8,8 +8,9 @@ Todo localization
 
 import csv, re, copy
 from decimal import *
-from datetime import datetime, timedelta, date
+from calendar import monthrange
 from collections import defaultdict
+from datetime import datetime, timedelta, date
 
 
 class ObjectifyData():
@@ -37,7 +38,7 @@ class ObjectifyData():
         # line = [10/07/2019,1-Bovespa,C,VIS,TAEE11 UNT N2,,100,"28,69",2869,D]
         line_dict = {}
         try:
-            dt = datetime.strptime(line[0], '%d/%m/%Y')
+            dt = datetime.strptime(line[0], '%d/%m/%Y').date()
             month = self.two_digits_month(dt.month)
             year_month_id = "%d%s" % (int(dt.year), month)
             year_month_id = int(year_month_id)
@@ -98,14 +99,16 @@ class ObjectifyData():
                         # if not 'KLBN11' in line['stock']:
                         #     continue
 
+                        # Whenever the months change (for each new month),
+                        # verify option expiration (OTM)
+                        if not line['year_month_id'] in self.mm:
+                            if self.running_options:
+                                updated_options = self.running_options.chk_running_options(line)
+                                self.months_update_option(updated_options)
+
                         # Objectify stock and months
                         stock_updated_instance = self.objectify_stock(line)
                         self.objectify_months(line, stock_updated_instance)
-
-                        # Check month changes, to verify option expiration (OTM)
-                        if not line['year_month_id'] in self.mm:
-                            if self.running_options:
-                                self.running_options.chk_running_options()
 
                         # Create or remove a running option.
                         if not self.is_stock(line['stock']): # If is option
@@ -118,7 +121,9 @@ class ObjectifyData():
                         raise
 
             # After the last operation check if there are OTM options
-            self.running_options.chk_running_options()
+            updated_options = self.running_options.chk_running_options(None)
+            self.months_update_option(updated_options)
+
 
         except (IOError, OSError):
             print("Error opening / processing file")
@@ -126,6 +131,10 @@ class ObjectifyData():
             pass
         return self.mm
 
+    def months_update_option(self, updated_options):
+        if updated_options:
+            for uo in updated_options:
+                self.objectify_months(uo, uo)
 
     def objectify_stock(self, line):
         """
@@ -177,20 +186,91 @@ class RunningOptions():
     def __delitem__(self, option):
         self._running_options.pop(option, None)
 
-    def expired_otm(self, option):
-        pass
-        Virou poh, entra como prejuizo.
+    def get_expiring_month(self):
+        """ Get the month validity on option code.
+        It is the fourth letter of the option code, following
+        PUT and CALL list codes """
+        option_type = ''
+        option_code_letter = self.running_option['stock'][4]
+        try:
+            expiring_month = CALL.index(option_code_letter) + 1
+            option_type =  'call'
+#            expiring_date = self.expiring_date(expiring_month)
+        except ValueError:
+            expiring_month = PUT.index(option_code_letter) + 1
+            option_type =  'put'
+#            expiring_date = self.calc_expiring_date(expiring_month)
+        except:
+            raise
+        return {'option_type':option_type, 'expiring_month':expiring_month}
+
+    def calc_expiring_date(self, expiring_month):
+        """ Calculates the expiration date of the option, assuming that
+        it is not possible to carry for more than a year. """
+        buy_month = self.running_option['dt'].month
+        current_year = datetime.today().year
+        expiring_year = self.running_option['dt'].year
+
+        """ If the month of the option is smaller than the actual month,
+        it refers to the month of the next year. """
+        if expiring_month < buy_month:
+            expiring_year += 1
+        expiring_date = date(expiring_year,
+                                expiring_month,
+                                monthrange(expiring_year, expiring_month)[1])
+        return expiring_date
+
+    def chk_option_expiring(self, reference_date):
+        """ Discover option expiring date based on option code and buy date.
+        If expired, set loss to the option object. """
+
+        def expired_otm(expiring_date):
+            """ Verify if option has lost validity """
+            if reference_date > expiring_date:
+                return True
+            return False
+
+        def set_option_loss():
+            """ Create an operation of selling option when it expires """
+            sold_option = copy.deepcopy(self.running_option)
+            sold_option['loss'] = self.running_option['qt_total'] * self.running_option['avg_price']
+            sold_option['value'] = 0
+            sold_option['qt_total'] = 0
+            sold_option['buy_sell'] = 'V'
+            return sold_option
+
+        decoded_option = self.get_expiring_month()
+        expiring_date = self.calc_expiring_date(decoded_option['expiring_month'])
+
+        if expired_otm(expiring_date):
+            sold_option = set_option_loss()
+            return sold_option
+
+    def cleanup_running_option(self, clean_running_option):
+        for cro in clean_running_option:
+            del self._running_options[cro['name']]
 
 
-    def chk_running_options(self):
-        print self._running_options
-        import pdb; pdb.set_trace()
+    def chk_running_options(self, line):
+        # Check options status against any date (reference date).
+        # Using a negotiation date (year_month_id).
+        reference_date = line['dt']
 
-        Fazer aqui. Verificar a data para o pohs loop do csv
+        # After the end of the loop of the csv file, check against today.
+        if not line:
+            reference_date = datetime.now()
 
-        pass
+        clean_running_option = []
+        sold_options = []
+        for key in self._running_options:
+            self.running_option = self._running_options[key]
+            sold_option = self.chk_option_expiring(reference_date)
+            if sold_option:
+                sold_options.append(sold_option)
+                clean_running_option.append(sold_option)
 
-
+        self.cleanup_running_option(clean_running_option)
+        return sold_options
 
 
 class Months():
@@ -350,18 +430,15 @@ class StockCheckingAccount():
                     .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
 
 
+# class OptionCheckingAccount(StockCheckingAccount):
+#     """ Not in use """
+#     def put_or_call(self):
+#         print self.name
+#         import pdb; pdb.set_trace()
 
 
-
-class OptionCheckingAccount(StockCheckingAccount):
-    """ Not in use """
-    CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
-    PUT = ['M','N','O','P','Q','R','S','T','U','V','W','X']
-
-    def put_or_call(self):
-        print self.name
-        import pdb; pdb.set_trace()
-
+CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
+PUT = ['M','N','O','P','Q','R','S','T','U','V','W','X']
 
 
 if __name__ == "__main__":
@@ -369,7 +446,7 @@ if __name__ == "__main__":
     months = b3_tax_obj.file2object()
     months.month_add_detail()
     months_keys = months.keys()
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     for month in months_keys:
         month_data = months.get_month(month)
         print
