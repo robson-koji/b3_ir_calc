@@ -1,5 +1,8 @@
 # b3_ir_calc
-Calculte income tax for B3(BM&FBOVESPA) stock operations. 
+Calculte income tax for B3(BM&FBOVESPA) stocks and options operations. 
+
+For options, it calculates only buy and sell operations. It doesn't calculates income tax for options that were exercised.
+
 
 To be a Python module for application. Still a standalone script.
 
@@ -21,6 +24,6 @@ pip install git+https://gitlab.com/bv_fapesp/django_excel_csv#egg=django_excel_c
 * Asset name change (sometimes it change)
 * Daytrade
 * Subtract broker fees
-* Options
+* ~~Options~~ 
 * Monthly statement
 * Short sale
