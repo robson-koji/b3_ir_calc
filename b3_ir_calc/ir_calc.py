@@ -12,17 +12,26 @@ from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta, date
 
+# Options month codes
+CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
+PUT = ['M','N','O','P','Q','R','S','T','U','V','W','X']
+
+MKT = {
+        'VIS':{'threshold_exempt':20000},
+        'OPV':{'threshold_exempt':0}
+        }
 
 class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, file, file_path="files/"):
+    def __init__(self, mkt_type, file, file_path="files/"):
         self.file_path = file_path
         self.file = file
-        self.mm = Months()
+        self.mm = Months(mkt_type)
         self.stocks = {}
         self.running_options = RunningOptions()
+        self.mkt_type = mkt_type
 
 
     def two_digits_month(self, month):
@@ -38,6 +47,8 @@ class ObjectifyData():
         # line = [10/07/2019,1-Bovespa,C,VIS,TAEE11 UNT N2,,100,"28,69",2869,D]
         line_dict = {}
         try:
+            if self.mkt_type != line[3]:
+                return
             dt = datetime.strptime(line[0], '%d/%m/%Y').date()
             month = self.two_digits_month(dt.month)
             year_month_id = "%d%s" % (int(dt.year), month)
@@ -51,6 +62,7 @@ class ObjectifyData():
             value = Decimal(line[8].replace('.', '').replace(',', '.').replace('"', ''))
             value = round(value, 2)
             buy_sell = line[2]
+
 
             line_dict = {'year_month_id':year_month_id,
                             'dt':dt,
@@ -95,6 +107,9 @@ class ObjectifyData():
                     try:
                         line = next(csv_reader)
                         line = self.read_line(line)
+                        if not line:
+                            continue
+
 
                         # if not 'KLBN11' in line['stock']:
                         #     continue
@@ -120,15 +135,15 @@ class ObjectifyData():
                     except Exception as e:
                         raise
 
-            # After the last operation check if there are OTM options
-            updated_options = self.running_options.chk_running_options(None)
-            self.months_update_option(updated_options)
-
-
         except (IOError, OSError):
             print("Error opening / processing file")
         except StopIteration:
             pass
+
+        # After the last operation check if there are OTM options
+        updated_options = self.running_options.chk_running_options(None)
+        self.months_update_option(updated_options)
+
         return self.mm
 
     def months_update_option(self, updated_options):
@@ -252,13 +267,13 @@ class RunningOptions():
 
 
     def chk_running_options(self, line):
-        # Check options status against any date (reference date).
-        # Using a negotiation date (year_month_id).
-        reference_date = line['dt']
-
-        # After the end of the loop of the csv file, check against today.
-        if not line:
-            reference_date = datetime.now()
+        try:
+            # Check options status against any date (reference date).
+            # Using a negotiation date (year_month_id).
+            reference_date = line['dt']
+        except:
+            # After the end of the loop of the csv file, check against today.
+            reference_date = datetime.now().date()
 
         clean_running_option = []
         sold_options = []
@@ -274,8 +289,9 @@ class RunningOptions():
 
 
 class Months():
-    def __init__(self):
+    def __init__(self, mkt_type):
         self._months = {}
+        self.mkt_type = mkt_type
 
     def __getitem__(self, month):
         stocks = {'operations':[], 'totalization':{}}
@@ -297,6 +313,7 @@ class Months():
     def month_populate(self, month, stock_updated_instance, **line):
         month_dict = self._months[month]
         month_dict['dt'] = line['dt']
+
         if (line['buy_sell'] == 'C'):
             month_dict['month_buy'] += line['value']
         elif (line['buy_sell'] == 'V'):
@@ -326,7 +343,7 @@ class Months():
         When the total amount sold on one month is less than R$20,000.00
         no tax are applied over gain
         """
-        return True if self._months[this_month]['month_sell'] > 20000 else False
+        return True if self._months[this_month]['month_sell'] > MKT[self.mkt_type]['threshold_exempt'] else False
 
     def tax_calc(self, final_balance):
         return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
@@ -430,23 +447,10 @@ class StockCheckingAccount():
                     .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
 
 
-# class OptionCheckingAccount(StockCheckingAccount):
-#     """ Not in use """
-#     def put_or_call(self):
-#         print self.name
-#         import pdb; pdb.set_trace()
 
 
-CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
-PUT = ['M','N','O','P','Q','R','S','T','U','V','W','X']
-
-
-if __name__ == "__main__":
-    b3_tax_obj = ObjectifyData('mirae.csv', '/home/robson/invest/')
-    months = b3_tax_obj.file2object()
-    months.month_add_detail()
+def report(months):
     months_keys = months.keys()
-    # import pdb; pdb.set_trace()
     for month in months_keys:
         month_data = months.get_month(month)
         print
@@ -455,3 +459,23 @@ if __name__ == "__main__":
 
         if month_data['tax']:
             print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
+
+
+
+if __name__ == "__main__":
+
+    print "\n\nMercado à vista"
+    print "==============="
+    b3_tax_obj = ObjectifyData('VIS', 'mirae.csv', '/home/robson/invest/')
+    months = b3_tax_obj.file2object()
+    months.month_add_detail()
+    report(months)
+
+
+
+    print "\n\nOpcoes PUT"
+    print "=========="
+    b3_tax_obj = ObjectifyData('OPV', 'mirae.csv', '/home/robson/invest/')
+    months = b3_tax_obj.file2object()
+    months.month_add_detail()
+    report(months)
