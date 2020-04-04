@@ -25,9 +25,9 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, file_path="files/"):
+    def __init__(self, mkt_type, file, path="files/"):
         self.mkt_type = mkt_type
-        self.file_path = file_path
+        self.file_path = path
         self.file = file
         self.mm = Months(mkt_type)
         self.stocks = {}
@@ -532,24 +532,41 @@ class Report():
 
 
 if __name__ == "__main__":
-    report = Report()
+    import argparse
+
+    def get_args():
+        """
+        To get stock prices from your CSV file, call this script wiht arguments.
+        python stock_price.py --path --file
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--mkt_type', default='VIS')
+        parser.add_argument('--path', default='test_sample')
+        parser.add_argument('--file', default='sample.csv')
+        args = parser.parse_args()
+        return args
+
+    args = get_args()
 
     print "\n\nMercado à vista"
     print "==============="
-    b3_tax_obj = ObjectifyData('VIS', 'mirae.csv', '/home/robson/invest/')
+    b3_tax_obj = ObjectifyData(mkt_type='VIS', path=args.path, file=args.file)
+    #b3_tax_obj = ObjectifyData('VIS', 'mirae.csv', '/home/robson/invest/')
     months = b3_tax_obj.file2object()
     months.month_add_detail()
 
+
+    report = Report()
     report.report(months)
     report.get_current_quotations()
     report.sell_losing(b3_tax_obj.stocks_wallet, months)
 
 
-    exit(0)
+    # exit(0)
 
     print "\n\nOpcoes PUT"
     print "=========="
-    b3_tax_obj = ObjectifyData('OPV', 'mirae.csv', '/home/robson/invest/')
+    b3_tax_obj = ObjectifyData('OPV', path=args.path, file=args.file)
     months = b3_tax_obj.file2object()
     months.month_add_detail()
     report.report(months)

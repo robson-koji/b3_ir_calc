@@ -1,6 +1,6 @@
 # coding: utf-8
 
-import argparse, bs4, json, requests
+import bs4, json, requests
 from urllib2 import urlopen
 from bs4 import BeautifulSoup
 from collections import defaultdict
@@ -9,7 +9,7 @@ from datetime import datetime, date
 from ir_calc import ObjectifyData
 
 
-def get_socks(mkt_type, file, path):
+def get_stocks(mkt_type, file, path):
     """
     Open a CSV file (source of operations at the broker)
     Make use of ir_calc.py ObjectifyData class.
@@ -51,17 +51,22 @@ def save_json(stock_price):
 
 
 if __name__ == "__main__":
-    """
-    To get stock prices from your CSV file, call this script wiht arguments.
-    python stock_price.py --path --file
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--mkt_type', default='VIS')
-    parser.add_argument('--path', default='test_sample')
-    parser.add_argument('--file', default='sample.csv')
-    args = parser.parse_args()
+    import argparse
+    
+    def get_args():
+        """
+        To get stock prices from your CSV file, call this script wiht arguments.
+        python stock_price.py --path --file
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--mkt_type', default='VIS')
+        parser.add_argument('--path', default='test_sample')
+        parser.add_argument('--file', default='sample.csv')
+        args = parser.parse_args()
+        return args
 
-    stocks = get_socks(mkt_type=args.mkt_type, path=args.path, file=    args.file)
+    args = get_args()
+    stocks = get_stocks(mkt_type=args.mkt_type, path=args.path, file=args.file)
     stock_price = defaultdict()
     for stock in stocks:
         try:
