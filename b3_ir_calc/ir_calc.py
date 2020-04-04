@@ -6,8 +6,8 @@ Todo localization
 """
 
 
-import csv, re, copy
 from decimal import *
+import csv, re, copy, json
 from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta, date
@@ -26,12 +26,13 @@ class ObjectifyData():
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
     def __init__(self, mkt_type, file, file_path="files/"):
+        self.mkt_type = mkt_type
         self.file_path = file_path
         self.file = file
         self.mm = Months(mkt_type)
         self.stocks = {}
         self.running_options = RunningOptions()
-        self.mkt_type = mkt_type
+        self.stocks_wallet = defaultdict()
 
 
     def two_digits_month(self, month):
@@ -49,6 +50,11 @@ class ObjectifyData():
         try:
             if self.mkt_type != line[3]:
                 return
+
+            # Column 10 filed, to ignore.
+            if line[10]:
+                return
+
             dt = datetime.strptime(line[0], '%d/%m/%Y').date()
             month = self.two_digits_month(dt.month)
             year_month_id = "%d%s" % (int(dt.year), month)
@@ -90,7 +96,7 @@ class ObjectifyData():
 
 
 
-    def file2object(self):
+    def file2object(self, csv_only=False):
         """
         Process file line by line using the file's returned iterator
         to permit working with large files.
@@ -103,13 +109,15 @@ class ObjectifyData():
                 next(csv_reader, None)
                 csv_reader = reversed(list(csv_reader))
 
+                if csv_only:
+                    return csv_reader
+
                 while True:
                     try:
                         line = next(csv_reader)
                         line = self.read_line(line)
                         if not line:
                             continue
-
 
                         # if not 'KLBN11' in line['stock']:
                         #     continue
@@ -172,6 +180,10 @@ class ObjectifyData():
 
         # deep copy operation values
         cp_stock = copy.deepcopy(stock.__dict__)
+
+        #if cp_stock['qt_total']:
+        self.stocks_wallet[cp_stock['stock']] = cp_stock
+
         return cp_stock
 
 
@@ -288,6 +300,58 @@ class RunningOptions():
         return sold_options
 
 
+
+class StockCheckingAccount():
+    def __init__(self, name):
+        self.name = name
+        self.qt_total = 0
+        self._avg_price = 0
+
+    @property
+    def avg_price(self):
+        return self._avg_price
+
+    @avg_price.setter
+    def avg_price(self, new_avg_price):
+        self._avg_price = new_avg_price
+
+    def new_avg_price(self, qt, unit_price):
+        current_position = self.qt_total * self.avg_price
+        new_dock = qt * unit_price
+        new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
+        self.avg_price = new_avg_price
+
+    def profit_loss(self, qt, unit_price):
+        if unit_price <= self.avg_price:
+            self.loss += (qt * self.avg_price) - (qt * unit_price)
+        elif unit_price >= self.avg_price:
+            self.profit += (qt * unit_price) - (qt * self.avg_price)
+
+    def start_operation(self, **kwargs):
+        # Pass all csv line values to stockCheckingAccount instance
+        self.__dict__.update(kwargs)
+        # Init profit and loss for this operation
+        # Will calculate this based on the avg_price * sell price.
+        self.profit = 0
+        self.loss = 0
+
+    def buy(self, **line):
+        self.new_avg_price(line['qt'], line['unit_price'])
+        self.qt_total += line['qt']
+
+    def sell(self, **line):
+        self.profit_loss(line['qt'], line['unit_price'])
+        if line['qt'] > self.qt_total:
+            # Sometimes changes stock operation code. IE unit conversion to ordinary
+            print 'Insufficient stocks: %s' % (line['stock'])
+            # raise ValueError("insufficient stocks")
+        self.qt_total -= line['qt']
+
+    def __repr__(self):
+        return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
+                    .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
+
+
 class Months():
     def __init__(self, mkt_type):
         self._months = {}
@@ -350,7 +414,7 @@ class Months():
 
     def month_add_detail(self):
         """
-        Add gain, loss for months.
+        Add gain, loss for all months.
         Calculate final balance and due tax.
         """
         # import pdb; pdb.set_trace()
@@ -394,88 +458,98 @@ class Months():
 
 
 
+class Report():
+    def __init__(self):
+        self.current_prices = dict
+        self.curr_prices_dt = ''
+
+    def get_current_quotations(self):
+        """
+        Whatever market data source you have.
+        This is getting form a serialized JSON from Yahoo Finance, from the
+        stock_price.py script
+        """
+        with open('files/stock_price.json', 'r') as f:
+            stock_price = json.load(f)
+            self.current_prices = stock_price[stock_price.keys()[0]]
+            self.curr_prices_dt = stock_price.keys()[0]
 
 
-class StockCheckingAccount():
-    def __init__(self, name):
-        self.name = name
-        self.qt_total = 0
-        self._avg_price = 0
+    def report(self, months):
+        months_keys = months.keys()
+        for month in months_keys:
+            month_data = months.get_month(month)
+            print
+            print 'Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell'])
+            print 'Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss'])
 
-    @property
-    def avg_price(self):
-        return self._avg_price
+            if month_data['tax']:
+                print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
 
-    @avg_price.setter
-    def avg_price(self, new_avg_price):
-        self._avg_price = new_avg_price
-
-    def new_avg_price(self, qt, unit_price):
-        current_position = self.qt_total * self.avg_price
-        new_dock = qt * unit_price
-        new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
-        self.avg_price = new_avg_price
-
-    def profit_loss(self, qt, unit_price):
-        if unit_price <= self.avg_price:
-            self.loss += (qt * self.avg_price) - (qt * unit_price)
-        elif unit_price >= self.avg_price:
-            self.profit += (qt * unit_price) - (qt * self.avg_price)
-
-    def start_operation(self, **kwargs):
-        # Pass all csv line values to stockCheckingAccount instance
-        self.__dict__.update(kwargs)
-        # Init profit and loss for this operation
-        # Will calculate this based on the avg_price * sell price.
-        self.profit = 0
-        self.loss = 0
-
-    def buy(self, **line):
-        self.new_avg_price(line['qt'], line['unit_price'])
-        self.qt_total += line['qt']
-
-    def sell(self, **line):
-        self.profit_loss(line['qt'], line['unit_price'])
-        if line['qt'] > self.qt_total:
-            # Sometimes changes stock operation code. IE unit conversion to ordinary
-            print 'Insufficient stocks: %s' % (line['stock'])
-            # raise ValueError("insufficient stocks")
-        self.qt_total -= line['qt']
-
-    def __repr__(self):
-        return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
-                    .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
+            for ops in month_data['operations']:
+                if ops['buy_sell'] == 'V':
+                    if ops['profit']:
+                        print "%s: %s " % (ops['stock'], ops['profit'])
+                    if ops['loss']:
+                        print "%s: -%s " % (ops['stock'], ops['loss'])
 
 
 
+    def sell_losing(self, stocks_wallet, months):
+        """
+        On the last day of the month you can sell your stocks where you are
+        losing, to reduce from your futures gains.
+        """
+        def current_position(stock, values):
+            current_price = self.current_prices[stock]
+            try:
+                buy_position = values['qt_total'] * values['avg_price']
+                curr_position = values['qt_total'] * round(Decimal(current_price['price']), 2)
+                balance = curr_position - buy_position
+                balance_pct = round((balance * 100 / buy_position), 2)
+                return (stock, values, buy_position, curr_position, balance, balance_pct)
+            except KeyError as e:
+                # If KeyError 'avg_price', means that no buy input was provided.
+                error = 'KeyError:%s' % (e)
+                raise Exception(('%s: ' + error)  % (values['stock']))
 
-def report(months):
-    months_keys = months.keys()
-    for month in months_keys:
-        month_data = months.get_month(month)
-        print
-        print 'Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell'])
-        print 'Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss'])
 
-        if month_data['tax']:
-            print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
 
+        print "\n\n\nCurrent prices: %s" % (self.curr_prices_dt)
+        for stock, values in stocks_wallet.items():
+            if values['qt_total']:
+                try:
+                    (stock, values, buy_position, curr_position, balance, balance_pct) = current_position(stock, values)
+                    print "%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%')
+                except Exception as e:
+                    print e
+
+
+
+"""
+!!! - parametrizar o arquivo de entrada
+"""
 
 
 if __name__ == "__main__":
+    report = Report()
 
     print "\n\nMercado à vista"
     print "==============="
     b3_tax_obj = ObjectifyData('VIS', 'mirae.csv', '/home/robson/invest/')
     months = b3_tax_obj.file2object()
     months.month_add_detail()
-    report(months)
+
+    report.report(months)
+    report.get_current_quotations()
+    report.sell_losing(b3_tax_obj.stocks_wallet, months)
 
 
+    exit(0)
 
     print "\n\nOpcoes PUT"
     print "=========="
     b3_tax_obj = ObjectifyData('OPV', 'mirae.csv', '/home/robson/invest/')
     months = b3_tax_obj.file2object()
     months.month_add_detail()
-    report(months)
+    report.report(months)
