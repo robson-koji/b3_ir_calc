@@ -21,6 +21,16 @@ MKT = {
         'OPV':{'threshold_exempt':0}
         }
 
+
+class InsufficientStocks(Exception):
+    """ Attempt to sell more stocks than in wallet """
+    pass
+
+class StockNotFound(Exception):
+    """ Attempt to sell more stocks than in wallet """
+    pass
+
+
 class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
@@ -33,6 +43,7 @@ class ObjectifyData():
         self.stocks = {}
         self.running_options = RunningOptions()
         self.stocks_wallet = defaultdict()
+        self.iligal_operation = defaultdict(list)
 
 
     def two_digits_month(self, month):
@@ -131,7 +142,9 @@ class ObjectifyData():
 
                         # Objectify stock and months
                         stock_updated_instance = self.objectify_stock(line)
-                        self.objectify_months(line, stock_updated_instance)
+                        if not stock_updated_instance:
+                            continue
+                        self.objectify_months(stock_updated_instance)
 
                         # Create or remove a running option.
                         if not self.is_stock(line['stock']): # If is option
@@ -157,7 +170,7 @@ class ObjectifyData():
     def months_update_option(self, updated_options):
         if updated_options:
             for uo in updated_options:
-                self.objectify_months(uo, uo)
+                self.objectify_months(uo)
 
     def objectify_stock(self, line):
         """
@@ -176,24 +189,27 @@ class ObjectifyData():
         if line['buy_sell'] == 'C':
             stock.buy(**line)
         if line['buy_sell'] == 'V':
-            stock.sell(**line)
+            try:
+                stock.sell(**line)
+            except InsufficientStocks:
+                line['exception'] = InsufficientStocks('%s: Insufficient stocks to sale (%s)'  % (line['stock'], line['dt']))
+                self.iligal_operation[line['stock']].append(line)
+                return None
 
         # deep copy operation values
         cp_stock = copy.deepcopy(stock.__dict__)
 
         #if cp_stock['qt_total']:
         self.stocks_wallet[cp_stock['stock']] = cp_stock
-
         return cp_stock
 
 
-    def objectify_months(self, line, stock_updated_instance):
+    def objectify_months(self, stock_updated_instance):
         #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
-        month = line['year_month_id']
+        month = stock_updated_instance['year_month_id']
         month_dict = self.mm[month]
-
         # Set operation attributes
-        self.mm.month_populate(month, stock_updated_instance, **line)
+        self.mm.month_populate(month, stock_updated_instance)
 
 
 
@@ -342,9 +358,7 @@ class StockCheckingAccount():
     def sell(self, **line):
         self.profit_loss(line['qt'], line['unit_price'])
         if line['qt'] > self.qt_total:
-            # Sometimes changes stock operation code. IE unit conversion to ordinary
-            print 'Insufficient stocks: %s' % (line['stock'])
-            # raise ValueError("insufficient stocks")
+            raise InsufficientStocks()
         self.qt_total -= line['qt']
 
     def __repr__(self):
@@ -374,7 +388,10 @@ class Months():
     def keys(self):
         return sorted(self._months.keys())
 
-    def month_populate(self, month, stock_updated_instance, **line):
+    def month_populate(self, month, stock_updated_instance):
+        line = stock_updated_instance
+        # if 'BMGB' in line['stock']:
+        #     import pdb; pdb.set_trace()
         month_dict = self._months[month]
         month_dict['dt'] = line['dt']
 
@@ -462,6 +479,7 @@ class Report():
     def __init__(self):
         self.current_prices = dict
         self.curr_prices_dt = ''
+        self.iligal_operation = defaultdict(list)
 
     def get_current_quotations(self):
         """
@@ -501,8 +519,8 @@ class Report():
         losing, to reduce from your futures gains.
         """
         def current_position(stock, values):
-            current_price = self.current_prices[stock]
             try:
+                current_price = self.current_prices[stock]
                 buy_position = values['qt_total'] * values['avg_price']
                 curr_position = values['qt_total'] * round(Decimal(current_price['price']), 2)
                 balance = curr_position - buy_position
@@ -510,9 +528,7 @@ class Report():
                 return (stock, values, buy_position, curr_position, balance, balance_pct)
             except KeyError as e:
                 # If KeyError 'avg_price', means that no buy input was provided.
-                error = 'KeyError:%s' % (e)
-                raise Exception(('%s: ' + error)  % (values['stock']))
-
+                raise StockNotFound
 
 
         print "\n\n\nCurrent prices: %s" % (self.curr_prices_dt)
@@ -521,19 +537,23 @@ class Report():
                 try:
                     (stock, values, buy_position, curr_position, balance, balance_pct) = current_position(stock, values)
                     print "%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%')
-                except Exception as e:
-                    print e
+                except StockNotFound:
+                    values['exception'] = StockNotFound('%s: StockNotFound (%s)'  % (values['stock'], values['dt']))
+                    self.iligal_operation[values['stock']].append(values)
 
-
-
-"""
-!!! - parametrizar o arquivo de entrada
-"""
+    def iligal_operations(self, iligal_operations):
+        print "\n\n\n"
+        print "Illigal operations"
+        print "=================="
+        for list_io in iligal_operations:
+            for stock, values in list_io.items():
+                for err in values:
+                    print err['exception']
 
 
 if __name__ == "__main__":
     import argparse
-
+    iligal_operations = []
     def get_args():
         """
         To get stock prices from your CSV file, call this script wiht arguments.
@@ -546,23 +566,41 @@ if __name__ == "__main__":
         args = parser.parse_args()
         return args
 
+    def handle_data(args):
+        b3_tax_obj = ObjectifyData(mkt_type='VIS', path=args.path, file=args.file)
+        return b3_tax_obj
+
+    def gather_iligal_operation(iligal_operation):
+        iligal_operations.append(iligal_operation)
+
+    def consolidate_months(b3_tax_obj):
+        months = b3_tax_obj.file2object()
+        months.month_add_detail()
+        return months
+
+    def generate_reports(stocks_wallet, months):
+        print "\n\nMercado à vista"
+        print "==============="
+        report = Report()
+        report.report(months)
+        report.get_current_quotations()
+        report.sell_losing(stocks_wallet, months)
+        gather_iligal_operation(report.iligal_operation)
+        report.iligal_operations(iligal_operations)
+
     args = get_args()
-
-    print "\n\nMercado à vista"
-    print "==============="
-    b3_tax_obj = ObjectifyData(mkt_type='VIS', path=args.path, file=args.file)
-    #b3_tax_obj = ObjectifyData('VIS', 'mirae.csv', '/home/robson/invest/')
-    months = b3_tax_obj.file2object()
-    months.month_add_detail()
+    b3_tax_obj = handle_data(args)
+    gather_iligal_operation(b3_tax_obj.iligal_operation)
+    months = consolidate_months(b3_tax_obj)
+    generate_reports(b3_tax_obj.stocks_wallet, months)
 
 
-    report = Report()
-    report.report(months)
-    report.get_current_quotations()
-    report.sell_losing(b3_tax_obj.stocks_wallet, months)
 
 
-    # exit(0)
+
+
+
+    exit(0)
 
     print "\n\nOpcoes PUT"
     print "=========="
