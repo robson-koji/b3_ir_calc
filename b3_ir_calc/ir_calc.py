@@ -73,7 +73,12 @@ class ObjectifyData():
             stock = line[4].split()[0]
             qt = int(line[6].replace('.', ''))
 
-            unit_price = Decimal(line[7].replace('.', '').replace(',', '.').replace('"', ''))
+            # Comma separator for decimal
+            if ',' in line[7]:
+                unit_price = Decimal(line[7].replace('.', '').replace(',', '.').replace('"', ''))
+            # Dot separator for decimal
+            else:
+                unit_price = Decimal(line[7].replace('"', ''))
             unit_price = round(unit_price, 2)
 
             value = Decimal(line[8].replace('.', '').replace(',', '.').replace('"', ''))
@@ -130,8 +135,8 @@ class ObjectifyData():
                         if not line:
                             continue
 
-                        # if not 'KLBN11' in line['stock']:
-                        #     continue
+                        # if not 'ITSA4' in line['stock']:
+                        #      continue
 
                         # Whenever the months change (for each new month),
                         # verify option expiration (OTM)
@@ -322,6 +327,9 @@ class StockCheckingAccount():
         self.name = name
         self.qt_total = 0
         self._avg_price = 0
+        self._qt_total_prev = 0 # for balance
+        self._avg_price_prev = 0 # for balance
+
 
     @property
     def avg_price(self):
@@ -335,6 +343,7 @@ class StockCheckingAccount():
         current_position = self.qt_total * self.avg_price
         new_dock = qt * unit_price
         new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
+        self._avg_price_prev = self.avg_price
         self.avg_price = new_avg_price
 
     def profit_loss(self, qt, unit_price):
@@ -353,6 +362,7 @@ class StockCheckingAccount():
 
     def buy(self, **line):
         self.new_avg_price(line['qt'], line['unit_price'])
+        self._qt_total_prev = self.qt_total
         self.qt_total += line['qt']
 
     def sell(self, **line):
@@ -360,6 +370,10 @@ class StockCheckingAccount():
         if line['qt'] > self.qt_total:
             raise InsufficientStocks()
         self.qt_total -= line['qt']
+        if self.qt_total == 0:
+            self._qt_total_prev = 0
+            self._avg_price_prev = 0
+            self.avg_price = 0
 
     def __repr__(self):
         return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
@@ -372,12 +386,13 @@ class Months():
         self.mkt_type = mkt_type
 
     def __getitem__(self, month):
-        stocks = {'operations':[], 'totalization':{}}
+        # stocks = {'operations':[], 'totalization':{}}
         return self._months.setdefault(month, {'dt':datetime,
                                                 'month_buy':0, 'month_sell':0,
                                                 'month_gain':0, 'month_loss':0,
                                                 'cumulate_gain':0, 'cumulate_loss':0,
-                                                'operations':[], 'tax':{}})
+                                                'operations':defaultdict(list),
+                                                'tax':{}})
 
     def __iter__(self):
         return iter(self._months)
@@ -400,7 +415,7 @@ class Months():
         elif (line['buy_sell'] == 'V'):
             month_dict['month_sell'] += line['value']
         if stock_updated_instance is not None:
-            month_dict['operations'].append(stock_updated_instance)
+            month_dict['operations'][line['stock']].append(stock_updated_instance)
 
     def subtract_one_month(self, this_month):
         """ receives current month, returns the key of previous active month """
@@ -442,12 +457,14 @@ class Months():
             balance_current_month = 0
             # if self._months[month]['month_sell'] > 20000:
             # print "%s Total vendas : %s" % (month, self._months[month]['month_sell'])
-            for operation in self._months[month]['operations']:
-                if operation['buy_sell'] == 'V':
-                    if operation['profit']:
-                        balance_current_month += operation['profit']
-                    elif operation['loss']:
-                        balance_current_month -= operation['loss']
+
+            for stock, values in self._months[month]['operations'].items():
+                for operation in values:
+                    if operation['buy_sell'] == 'V':
+                        if operation['profit']:
+                            balance_current_month += operation['profit']
+                        elif operation['loss']:
+                            balance_current_month -= operation['loss']
 
                 # print operation
             if balance_current_month > 0:
@@ -492,24 +509,58 @@ class Report():
             self.current_prices = stock_price[stock_price.keys()[0]]
             self.curr_prices_dt = stock_price.keys()[0]
 
+    def build_statement(self, values):
+        statement = {'qt_total_start':0,
+                     'avg_price_start':0,
+                     'values':[],
+                     'qt_total_end':0,
+                     'avg_price_end':0 }
+
+        if len(values) == 1:
+            operation = values[0]
+            statement = {'qt_total_start':operation['_qt_total_prev'],
+                         'avg_price_start':operation['_avg_price_prev'],
+                         'ops':[operation],
+                         'qt_total_end':operation['qt_total'],
+                         'avg_price_end':operation['avg_price'] }
+        elif len(values) > 1:
+            operation_start = values[0]
+            operation_end = values[-1]
+            statement = {'qt_total_start':operation_start['_qt_total_prev'],
+                         'avg_price_start':operation_start['_avg_price_prev'],
+                         'ops':values,
+                         'qt_total_end':operation_end['qt_total'],
+                         'avg_price_end':operation_end['avg_price'] }
+        return statement
+
+
 
     def report(self, months):
         months_keys = months.keys()
         for month in months_keys:
             month_data = months.get_month(month)
-            print
+            print "\n\n===================================== \n\n\n"
             print 'Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell'])
             print 'Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss'])
 
             if month_data['tax']:
                 print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
 
-            for ops in month_data['operations']:
-                if ops['buy_sell'] == 'V':
-                    if ops['profit']:
-                        print "%s: %s " % (ops['stock'], ops['profit'])
-                    if ops['loss']:
-                        print "%s: -%s " % (ops['stock'], ops['loss'])
+            for stock, values in month_data['operations'].items():
+                # if stock != 'KLBN11':
+                #     continue
+                print
+                print "Stock: %s" % (stock)
+                for ops in values:
+                    if ops['buy_sell'] == 'V':
+                        if ops['profit']:
+                            print "%s: %s " % ('Balance', ops['profit'])
+                        if ops['loss']:
+                            print "%s: -%s " % ('Balance', ops['loss'])
+                statement = self.build_statement(values)
+
+                print statement
+
 
 
 
@@ -583,6 +634,7 @@ if __name__ == "__main__":
         print "==============="
         report = Report()
         report.report(months)
+
         report.get_current_quotations()
         report.sell_losing(stocks_wallet, months)
         gather_iligal_operation(report.iligal_operation)
