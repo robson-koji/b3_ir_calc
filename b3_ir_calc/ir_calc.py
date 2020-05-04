@@ -97,7 +97,7 @@ class ObjectifyData():
             # import pdb; pdb.set_trace()
             return line_dict
         except Exception as e:
-            print e
+            print(e)
             raise
 
 
@@ -375,9 +375,9 @@ class StockCheckingAccount():
             self._avg_price_prev = 0
             self.avg_price = 0
 
-    def __repr__(self):
-        return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
-                    .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
+    # def __repr__(self):
+    #     return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
+    #                 .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
 
 
 class Months():
@@ -442,7 +442,8 @@ class Months():
         return True if self._months[this_month]['month_sell'] > MKT[self.mkt_type]['threshold_exempt'] else False
 
     def tax_calc(self, final_balance):
-        return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
+        #return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
+        return {'final_balance':final_balance, 'tax_amount': final_balance * Decimal(0.15)}
 
     def month_add_detail(self):
         """
@@ -451,12 +452,12 @@ class Months():
         """
         # import pdb; pdb.set_trace()
         for month in self.keys():
-            # print "\n\n"
-            # print month
+            # print("\n\n"
+            # print(month
 
             balance_current_month = 0
             # if self._months[month]['month_sell'] > 20000:
-            # print "%s Total vendas : %s" % (month, self._months[month]['month_sell'])
+            # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
 
             for stock, values in self._months[month]['operations'].items():
                 for operation in values:
@@ -466,7 +467,7 @@ class Months():
                         elif operation['loss']:
                             balance_current_month -= operation['loss']
 
-                # print operation
+                # print(operation
             if balance_current_month > 0:
                 self._months[month]['month_gain'] =  balance_current_month
             elif balance_current_month < 0:
@@ -483,11 +484,11 @@ class Months():
                     elif final_balance <= 0:
                         self._months[month]['cumulate_loss'] = final_balance
 
-            # print balance_current_month
-            # print self._months[month]['month_gain']
-            # print self._months[month]['month_loss']
-            # print self._months[month]['cumulate_loss']
-            # print self._months[month]['tax']
+            # print(balance_current_month
+            # print(self._months[month]['month_gain']
+            # print(self._months[month]['month_loss']
+            # print(self._months[month]['cumulate_loss']
+            # print(self._months[month]['tax']
 
 
 
@@ -498,16 +499,16 @@ class Report():
         self.curr_prices_dt = ''
         self.iligal_operation = defaultdict(list)
 
-    def get_current_quotations(self):
+    def get_current_quotations(self, stock_price_file):
         """
         Whatever market data source you have.
         This is getting form a serialized JSON from Yahoo Finance, from the
         stock_price.py script
-        """
-        with open('files/stock_price.json', 'r') as f:
+        """        
+        with open(stock_price_file, 'r') as f:
             stock_price = json.load(f)
-            self.current_prices = stock_price[stock_price.keys()[0]]
-            self.curr_prices_dt = stock_price.keys()[0]
+            self.current_prices = stock_price[list(stock_price.keys())[0]]
+            self.curr_prices_dt = list(stock_price.keys())[0]
 
     def build_statement(self, values):
         statement = {'qt_total_start':0,
@@ -516,8 +517,18 @@ class Report():
                      'qt_total_end':0,
                      'avg_price_end':0 }
 
+
+
+        """
+        !!! Atencao, vendo pq erro aqui no avg price
+        """
+        if not 'avg_price' in values[0]:
+            return
+
+
         if len(values) == 1:
             operation = values[0]
+
             statement = {'qt_total_start':operation['_qt_total_prev'],
                          'avg_price_start':operation['_avg_price_prev'],
                          'ops':[operation],
@@ -539,27 +550,27 @@ class Report():
         months_keys = months.keys()
         for month in months_keys:
             month_data = months.get_month(month)
-            print "\n\n===================================== \n\n\n"
-            print 'Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell'])
-            print 'Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss'])
+            print("\n\n===================================== \n\n\n")
+            print('Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell']))
+            print('Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss']))
 
             if month_data['tax']:
-                print 'Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance'])
+                print('Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance']))
 
             for stock, values in month_data['operations'].items():
                 # if stock != 'KLBN11':
                 #     continue
                 print
-                print "Stock: %s" % (stock)
+                print("Stock: %s" % (stock))
                 for ops in values:
                     if ops['buy_sell'] == 'V':
                         if ops['profit']:
-                            print "%s: %s " % ('Balance', ops['profit'])
+                            print("%s: %s " % ('Balance', ops['profit']))
                         if ops['loss']:
-                            print "%s: -%s " % ('Balance', ops['loss'])
+                            print("%s: -%s " % ('Balance', ops['loss']))
                 statement = self.build_statement(values)
 
-                print statement
+                print(statement)
 
 
 
@@ -582,24 +593,24 @@ class Report():
                 raise StockNotFound
 
 
-        print "\n\n\nCurrent prices: %s" % (self.curr_prices_dt)
+        print("\n\n\nCurrent prices: %s" % (self.curr_prices_dt))
         for stock, values in stocks_wallet.items():
             if values['qt_total']:
                 try:
                     (stock, values, buy_position, curr_position, balance, balance_pct) = current_position(stock, values)
-                    print "%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%')
+                    print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
                 except StockNotFound:
                     values['exception'] = StockNotFound('%s: StockNotFound (%s)'  % (values['stock'], values['dt']))
                     self.iligal_operation[values['stock']].append(values)
 
     def iligal_operations(self, iligal_operations):
-        print "\n\n\n"
-        print "Illigal operations"
-        print "=================="
+        print("\n\n\n")
+        print("Illigal operations")
+        print("==================")
         for list_io in iligal_operations:
             for stock, values in list_io.items():
                 for err in values:
-                    print err['exception']
+                    print(err['exception'])
 
 
 if __name__ == "__main__":
@@ -630,12 +641,12 @@ if __name__ == "__main__":
         return months
 
     def generate_reports(stocks_wallet, months):
-        print "\n\nMercado à vista"
-        print "==============="
+        print("\n\nMercado à vista")
+        print("===============")
         report = Report()
         report.report(months)
 
-        report.get_current_quotations()
+        report.get_current_quotations('files/stock_price.json')
         report.sell_losing(stocks_wallet, months)
         gather_iligal_operation(report.iligal_operation)
         report.iligal_operations(iligal_operations)
@@ -654,8 +665,8 @@ if __name__ == "__main__":
 
     exit(0)
 
-    print "\n\nOpcoes PUT"
-    print "=========="
+    print("\n\nOpcoes PUT")
+    print("==========")
     b3_tax_obj = ObjectifyData('OPV', path=args.path, file=args.file)
     months = b3_tax_obj.file2object()
     months.month_add_detail()
