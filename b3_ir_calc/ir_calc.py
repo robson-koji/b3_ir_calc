@@ -339,12 +339,21 @@ class StockCheckingAccount():
     def avg_price(self, new_avg_price):
         self._avg_price = new_avg_price
 
+    @property
+    def avg_price_prev(self):
+        return self._avg_price_prev
+
+
     def new_avg_price(self, qt, unit_price):
         current_position = self.qt_total * self.avg_price
         new_dock = qt * unit_price
         new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
         self._avg_price_prev = self.avg_price
         self.avg_price = new_avg_price
+
+        # !!! This is a workaround that was working before p3 migration
+        self.__dict__['avg_price'] = self.avg_price
+        self.__dict__['avg_price_prev'] = self.avg_price_prev
 
     def profit_loss(self, qt, unit_price):
         if unit_price <= self.avg_price:
@@ -375,9 +384,9 @@ class StockCheckingAccount():
             self._avg_price_prev = 0
             self.avg_price = 0
 
-    # def __repr__(self):
-    #     return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
-    #                 .format(self.name, self.dt.date(), self.qt_total, self.avg_price, self.profit, self.loss)
+    def __repr__(self):
+        return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
+                    .format(self.name, self.dt, self.qt_total, self.avg_price, self.profit, self.loss)
 
 
 class Months():
@@ -484,28 +493,31 @@ class Months():
                     elif final_balance <= 0:
                         self._months[month]['cumulate_loss'] = final_balance
 
-            # print(balance_current_month
-            # print(self._months[month]['month_gain']
-            # print(self._months[month]['month_loss']
-            # print(self._months[month]['cumulate_loss']
-            # print(self._months[month]['tax']
+            # print(balance_current_month)
+            # print(self._months[month]['month_gain'])
+            # print(self._months[month]['month_loss'])
+            # print(self._months[month]['cumulate_loss'])
+            # print(self._months[month]['tax'])
 
 
 
 
 class Report():
-    def __init__(self):
+    def __init__(self, stock_price_file, stocks_wallet, months):
         self.current_prices = dict
         self.curr_prices_dt = ''
         self.iligal_operation = defaultdict(list)
+        self.months = months
+        self.stock_price_file = stock_price_file
+        self.stocks_wallet = stocks_wallet
 
-    def get_current_quotations(self, stock_price_file):
+    def get_current_quotations(self):
         """
         Whatever market data source you have.
         This is getting form a serialized JSON from Yahoo Finance, from the
         stock_price.py script
-        """        
-        with open(stock_price_file, 'r') as f:
+        """
+        with open(self.stock_price_file, 'r') as f:
             stock_price = json.load(f)
             self.current_prices = stock_price[list(stock_price.keys())[0]]
             self.curr_prices_dt = list(stock_price.keys())[0]
@@ -516,15 +528,6 @@ class Report():
                      'values':[],
                      'qt_total_end':0,
                      'avg_price_end':0 }
-
-
-
-        """
-        !!! Atencao, vendo pq erro aqui no avg price
-        """
-        if not 'avg_price' in values[0]:
-            return
-
 
         if len(values) == 1:
             operation = values[0]
@@ -545,14 +548,27 @@ class Report():
         return statement
 
 
-
-    def report(self, months):
-        months_keys = months.keys()
+    def months_build_data(self):
+        months = {}
+        months_operations = {}
+        months_keys = self.months.keys()
+        months_keys.reverse()
         for month in months_keys:
-            month_data = months.get_month(month)
+            month_data = self.months.get_month(month)
+            months[month] = month_data
+            months_operations[month] = dict(month_data['operations'])
+        return (months, months_operations)
+
+
+    def report(self):
+        """ to refactor - was used for command line tests
+        use the months_build_data method as web app """
+        months_keys = self.months.keys()
+        for month in months_keys:
+            month_data = self.months.get_month(month)
             print("\n\n===================================== \n\n\n")
             print('Mês: {0} / Vendas no mes: {1}'.format(month, month_data['month_sell']))
-            print('Lucro: {0} / Prejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss']))
+            print('Lucro: {0} / PositionViewPrejuízo: {1} / Prejuizo acumulado: {2}'.format(month_data['month_gain'], month_data['month_loss'], month_data['cumulate_loss']))
 
             if month_data['tax']:
                 print('Balanço mês: {1} / Imposto devido: {0}'.format(month_data['tax']['tax_amount'], month_data['tax']['final_balance']))
@@ -569,18 +585,20 @@ class Report():
                         if ops['loss']:
                             print("%s: -%s " % ('Balance', ops['loss']))
                 statement = self.build_statement(values)
-
                 print(statement)
 
 
+    def current_position(self):
+        """ to refactor - was used for command line tests
+        use the months_build_data method as web app """
 
-
-    def sell_losing(self, stocks_wallet, months):
         """
         On the last day of the month you can sell your stocks where you are
         losing, to reduce from your futures gains.
         """
-        def current_position(stock, values):
+        position = []
+        summary = defaultdict(Decimal)
+        def get_stock_position(stock, values):
             try:
                 current_price = self.current_prices[stock]
                 buy_position = values['qt_total'] * values['avg_price']
@@ -592,16 +610,35 @@ class Report():
                 # If KeyError 'avg_price', means that no buy input was provided.
                 raise StockNotFound
 
-
         print("\n\n\nCurrent prices: %s" % (self.curr_prices_dt))
-        for stock, values in stocks_wallet.items():
+        for stock, values in self.stocks_wallet.items():
             if values['qt_total']:
                 try:
-                    (stock, values, buy_position, curr_position, balance, balance_pct) = current_position(stock, values)
+                    (stock, values, buy_position, curr_position, balance, balance_pct) = get_stock_position(stock, values)
                     print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
+                    position.append({
+                        'stock': stock,
+                        'qt': values['qt_total'],
+                        'buy_avg': values['avg_price'],
+                        'curr_price': self.current_prices[stock]['price'],
+                        'buy_total':buy_position,
+                        'cur_total':curr_position,
+                        'balance': balance,
+                        'balance_pct': balance_pct
+                    })
+                    # import pdb; pdb.set_trace()
+                    summary['balance'] += balance
+                    summary['buy_total'] += buy_position
+                    summary['cur_total'] += curr_position
+
+                    # import pdb; pdb.set_trace()
+
                 except StockNotFound:
                     values['exception'] = StockNotFound('%s: StockNotFound (%s)'  % (values['stock'], values['dt']))
                     self.iligal_operation[values['stock']].append(values)
+        summary['balance_pct'] =  (100 * (summary['cur_total'] - summary['buy_total'])) / summary['buy_total']
+        return (position, summary)
+
 
     def iligal_operations(self, iligal_operations):
         print("\n\n\n")
@@ -635,7 +672,7 @@ if __name__ == "__main__":
     def gather_iligal_operation(iligal_operation):
         iligal_operations.append(iligal_operation)
 
-    def consolidate_months(b3_tax_obj):
+    def months_reconcile(b3_tax_obj):
         months = b3_tax_obj.file2object()
         months.month_add_detail()
         return months
@@ -646,15 +683,15 @@ if __name__ == "__main__":
         report = Report()
         report.report(months)
 
-        report.get_current_quotations('files/stock_price.json')
-        report.sell_losing(stocks_wallet, months)
+        report.get_current_quotations('/tmp/stock_price.json')
+        report.current_position(stocks_wallet, months)
         gather_iligal_operation(report.iligal_operation)
         report.iligal_operations(iligal_operations)
 
     args = get_args()
     b3_tax_obj = handle_data(args)
     gather_iligal_operation(b3_tax_obj.iligal_operation)
-    months = consolidate_months(b3_tax_obj)
+    months = months_reconcile(b3_tax_obj)
     generate_reports(b3_tax_obj.stocks_wallet, months)
 
 
