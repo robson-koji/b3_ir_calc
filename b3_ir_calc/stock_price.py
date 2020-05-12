@@ -46,13 +46,13 @@ def save_json(stock_price):
     """ Save stock price to a JSON file """
     now = datetime.now().date()
     dict_json = {str(now): stock_price}
-    with open('files/stock_price.json', 'w') as fp:
+    with open('/tmp/stock_price.json', 'w') as fp:
         json.dump(dict_json, fp)
 
 
 if __name__ == "__main__":
     import argparse
-    
+
     def get_args():
         """
         To get stock prices from your CSV file, call this script wiht arguments.
