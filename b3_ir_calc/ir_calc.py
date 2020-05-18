@@ -43,7 +43,7 @@ class ObjectifyData():
         self.stocks = {}
         self.running_options = RunningOptions()
         self.stocks_wallet = defaultdict()
-        self.iligal_operation = defaultdict(list)
+        self.illegal_operation = defaultdict(list)
 
 
     def two_digits_month(self, month):
@@ -63,9 +63,13 @@ class ObjectifyData():
                 return
 
             # Column 10 filed, to ignore.
-            if line[10]:
+            # import pdb; pdb.set_trace()
+            if len(line) == 11 and line[10]:
                 return
 
+            """
+            !!! Compatibilizar as datas. Provavelmente tudo com 2 digitos no ano.
+            """
             dt = datetime.strptime(line[0], '%d/%m/%Y').date()
             month = self.two_digits_month(dt.month)
             year_month_id = "%d%s" % (int(dt.year), month)
@@ -80,7 +84,7 @@ class ObjectifyData():
             else:
                 unit_price = Decimal(line[7].replace('"', ''))
             unit_price = round(unit_price, 2)
-
+#            print(line)
             value = Decimal(line[8].replace('.', '').replace(',', '.').replace('"', ''))
             value = round(value, 2)
             buy_sell = line[2]
@@ -94,6 +98,7 @@ class ObjectifyData():
                             'unit_price': unit_price,
                             'buy_sell': buy_sell,
                             }
+            # print(line_dict)
             # import pdb; pdb.set_trace()
             return line_dict
         except Exception as e:
@@ -121,8 +126,11 @@ class ObjectifyData():
         try:
             file_path = '%s%s' % (self.file_path, self.file)
             with open(file_path) as file_handler:
+                # import pdb; pdb.set_trace()
                 csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
-                next(csv_reader, None)
+
+                # To remove excel header if exists
+                # next(csv_reader, None)
                 csv_reader = reversed(list(csv_reader))
 
                 if csv_only:
@@ -198,7 +206,7 @@ class ObjectifyData():
                 stock.sell(**line)
             except InsufficientStocks:
                 line['exception'] = InsufficientStocks('%s: Insufficient stocks to sale (%s)'  % (line['stock'], line['dt']))
-                self.iligal_operation[line['stock']].append(line)
+                self.illegal_operation[line['stock']].append(line)
                 return None
 
         # deep copy operation values
@@ -452,6 +460,7 @@ class Months():
 
     def tax_calc(self, final_balance):
         #return {'final_balance':final_balance, 'tax_amount': final_balance * 0.15}
+        #import pdb; pdb.set_trace()
         return {'final_balance':final_balance, 'tax_amount': final_balance * Decimal(0.15)}
 
     def month_add_detail(self):
@@ -489,7 +498,7 @@ class Months():
                     final_balance = balance_current_month + self._months[month]['cumulate_loss']
                     if final_balance > 0:
                         self._months[month]['cumulate_loss'] = 0
-                        self._months[month]['tax'] = self.tax_calc(final_balance)
+                        self._months[month]['tax'] = self.tax_calc(Decimal(final_balance))
                     elif final_balance <= 0:
                         self._months[month]['cumulate_loss'] = final_balance
 
@@ -506,7 +515,7 @@ class Report():
     def __init__(self, stock_price_file, stocks_wallet, months):
         self.current_prices = dict
         self.curr_prices_dt = ''
-        self.iligal_operation = defaultdict(list)
+        self.illegal_operation = defaultdict(list)
         self.months = months
         self.stock_price_file = stock_price_file
         self.stocks_wallet = stocks_wallet
@@ -605,7 +614,8 @@ class Report():
                 curr_position = values['qt_total'] * round(Decimal(current_price['price']), 2)
                 balance = curr_position - buy_position
                 balance_pct = round((balance * 100 / buy_position), 2)
-                return (stock, values, buy_position, curr_position, balance, balance_pct)
+                # import pdb; pdb.set_trace()
+                return (stock, values, Decimal(buy_position), Decimal(curr_position), Decimal(balance), balance_pct)
             except KeyError as e:
                 # If KeyError 'avg_price', means that no buy input was provided.
                 raise StockNotFound
@@ -626,8 +636,8 @@ class Report():
                         'balance': balance,
                         'balance_pct': balance_pct
                     })
-                    # import pdb; pdb.set_trace()
                     summary['balance'] += balance
+                    # import pdb; pdb.set_trace()
                     summary['buy_total'] += buy_position
                     summary['cur_total'] += curr_position
 
@@ -635,16 +645,18 @@ class Report():
 
                 except StockNotFound:
                     values['exception'] = StockNotFound('%s: StockNotFound (%s)'  % (values['stock'], values['dt']))
-                    self.iligal_operation[values['stock']].append(values)
-        summary['balance_pct'] =  (100 * (summary['cur_total'] - summary['buy_total'])) / summary['buy_total']
+                    self.illegal_operation[values['stock']].append(values)
+        # import pdb; pdb.set_trace()
+        if not summary['buy_total'] == 0:
+            summary['balance_pct'] =  (100 * (summary['cur_total'] - summary['buy_total'])) / summary['buy_total']
         return (position, summary)
 
 
-    def iligal_operations(self, iligal_operations):
+    def illegal_operations(self, illegal_operations):
         print("\n\n\n")
         print("Illigal operations")
         print("==================")
-        for list_io in iligal_operations:
+        for list_io in illegal_operations:
             for stock, values in list_io.items():
                 for err in values:
                     print(err['exception'])
@@ -652,7 +664,7 @@ class Report():
 
 if __name__ == "__main__":
     import argparse
-    iligal_operations = []
+    illegal_operations = []
     def get_args():
         """
         To get stock prices from your CSV file, call this script wiht arguments.
@@ -669,8 +681,8 @@ if __name__ == "__main__":
         b3_tax_obj = ObjectifyData(mkt_type='VIS', path=args.path, file=args.file)
         return b3_tax_obj
 
-    def gather_iligal_operation(iligal_operation):
-        iligal_operations.append(iligal_operation)
+    def gather_illegal_operation(illegal_operation):
+        illegal_operations.append(illegal_operation)
 
     def months_reconcile(b3_tax_obj):
         months = b3_tax_obj.file2object()
@@ -680,17 +692,19 @@ if __name__ == "__main__":
     def generate_reports(stocks_wallet, months):
         print("\n\nMercado à vista")
         print("===============")
-        report = Report()
-        report.report(months)
+        # report = Report()
+        report = Report('/var/tmp/stock_price.json', stocks_wallet, months)
 
-        report.get_current_quotations('/tmp/stock_price.json')
-        report.current_position(stocks_wallet, months)
-        gather_iligal_operation(report.iligal_operation)
-        report.iligal_operations(iligal_operations)
+        report.report()
+
+        report.get_current_quotations()
+        report.current_position()
+        gather_illegal_operation(report.illegal_operation)
+        report.illegal_operations(illegal_operations)
 
     args = get_args()
     b3_tax_obj = handle_data(args)
-    gather_iligal_operation(b3_tax_obj.iligal_operation)
+    gather_illegal_operation(b3_tax_obj.illegal_operation)
     months = months_reconcile(b3_tax_obj)
     generate_reports(b3_tax_obj.stocks_wallet, months)
 
