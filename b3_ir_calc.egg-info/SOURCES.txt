@@ -1,0 +1,17 @@
+README.md
+setup.py
+b3_ir_calc/__init__.py
+b3_ir_calc/b3excel2csv.py
+b3_ir_calc/cei2thiscsv.py
+b3_ir_calc/get_b3_list.py
+b3_ir_calc/ir_calc.py
+b3_ir_calc/stock_price.py
+b3_ir_calc.egg-info/PKG-INFO
+b3_ir_calc.egg-info/SOURCES.txt
+b3_ir_calc.egg-info/dependency_links.txt
+b3_ir_calc.egg-info/top_level.txt
+b3_ir_calc/conf/__init__.py
+b3_ir_calc/conf/conf.py
+b3_ir_calc/conf/local_conf.py
+tests/__init__.py
+tests/test_all.py

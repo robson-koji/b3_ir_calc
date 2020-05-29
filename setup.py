@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="b3_ir_calc", # Replace with your own username
-    version="0.0.1",
+    version="0.0.2",
     author="Koji",
     author_email="robson.koji@gmail.com",
     description="B3 income tax calculator",
