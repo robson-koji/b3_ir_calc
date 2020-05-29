@@ -4,11 +4,10 @@ from datetime import datetime
 
 from b3_ir_calc.ir_calc import ObjectifyData, Months, StockCheckingAccount
 
-
 class ObjectifyDataTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.od = ObjectifyData(file='sample.csv', file_path='files/test_sample/')
+        cls.od = ObjectifyData(mkt_type='VIS', file='sample.csv', path='files/test_sample/')
         cls.months = cls.od.file2object()
         cls.csv_line = ['10/07/2019','1-Bovespa','C','VIS','TATA11 UNT N2','','100','28,69','2869','D']
 
@@ -19,7 +18,11 @@ class ObjectifyDataTest(unittest.TestCase):
     def test_dict_keys(self):
         """ Test response of line to dict has expected keys """
         expected_keys = ['qt', 'buy_sell', 'unit_price', 'year_month_id', 'value', 'dt', 'stock']
-        self.assertListEqual(self.od.read_line(self.csv_line).keys(), expected_keys)
+        s_csv_line = list(self.od.read_line(self.csv_line).keys())
+        s_csv_line.sort()
+        expected_keys.sort()
+        # import pdb; pdb.set_trace()
+        self.assertListEqual(s_csv_line, expected_keys)
 
     def test_two_digits_month(self):
         """ Standalone utility function """
@@ -38,7 +41,7 @@ class ObjectifyDataTest(unittest.TestCase):
 class MonthTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mm = Months()
+        cls.mm = Months('VIS')
         cls.line_dict = {'year_month_id':'201901', 'dt':datetime.now, 'stock':'ABCD12', 'value':1.11, 'buy_sell': 'C' }
 
 

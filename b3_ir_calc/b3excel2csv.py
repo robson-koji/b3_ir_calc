@@ -11,10 +11,16 @@ from django.conf import settings
 def excel_to_csv(path, file):
     try:
         #file_path_excel = "/home/robson/Downloads/InfoCEI (17).xls"
-        path = path.replace('/media/', '')
-        path = "%s%s" % (settings.MEDIA_ROOT, path)
+        if path:
+            path = path.replace('/media/', '')
+            path = "%s%s" % (settings.MEDIA_ROOT, path)
+
+            #file_path_excel = "%s/%s" % (path, file)
+        else:
+            path = settings.MEDIA_ROOT
 
         file_path_excel = "%s/%s" % (path, file)
+
         file_path_csv = "%s/%s" % (path, file.replace('.xls', '.csv'))
 
         # import pdb; pdb.set_trace()
