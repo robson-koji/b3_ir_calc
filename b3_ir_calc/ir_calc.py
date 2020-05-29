@@ -526,10 +526,12 @@ class Report():
         This is getting form a serialized JSON from Yahoo Finance, from the
         stock_price.py script
         """
+        # import pdb; pdb.set_trace()
         with open(self.stock_price_file, 'r') as f:
             stock_price = json.load(f)
             self.current_prices = stock_price[list(stock_price.keys())[0]]
             self.curr_prices_dt = list(stock_price.keys())[0]
+            # import pdb; pdb.set_trace()
 
     def build_statement(self, values):
         statement = {'qt_total_start':0,
@@ -611,6 +613,10 @@ class Report():
             try:
                 current_price = self.current_prices[stock]
                 buy_position = values['qt_total'] * values['avg_price']
+
+                if current_price['price']=='None':
+                    raise StockNotFound
+
                 curr_position = values['qt_total'] * round(Decimal(current_price['price']), 2)
                 balance = curr_position - buy_position
                 balance_pct = round((balance * 100 / buy_position), 2)
@@ -618,6 +624,7 @@ class Report():
                 return (stock, values, Decimal(buy_position), Decimal(curr_position), Decimal(balance), balance_pct)
             except KeyError as e:
                 # If KeyError 'avg_price', means that no buy input was provided.
+                import pdb; pdb.set_trace()
                 raise StockNotFound
 
         print("\n\n\nCurrent prices: %s" % (self.curr_prices_dt))
