@@ -7,7 +7,7 @@ Todo localization
 
 
 from decimal import *
-import csv, re, copy, json
+import os, csv, re, copy, json
 from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta, date
@@ -45,6 +45,9 @@ class ObjectifyData():
         self.stocks_wallet = defaultdict()
         self.illegal_operation = defaultdict(list)
 
+        file_path = '%s%s' % (self.file_path, self.file)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError('FileNotFound: %s' % (file_path))
 
     def two_digits_month(self, month):
         """
@@ -125,6 +128,7 @@ class ObjectifyData():
         """
         try:
             file_path = '%s%s' % (self.file_path, self.file)
+
             with open(file_path) as file_handler:
                 # import pdb; pdb.set_trace()
                 csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
@@ -599,6 +603,24 @@ class Report():
                 print(statement)
 
 
+    def brokerage_taxes(self):
+        """
+        Still static for Mirae asset only and for stock in cash.
+        Must return for each broker and for each market as well.
+        B3 Emoluments:  http://www.b3.com.br/pt_br/produtos-e-servicos/tarifas/listados-a-vista-e-derivativos/renda-variavel/tarifas-de-acoes-e-fundos-de-investimento/a-vista/
+        Mirae brokerage: https://corretora.miraeasset.com.br/new/informacoes/Custos%20e%20Taxas/Custos%20Operacionais%20-%20Taxa%20de%20Corretagem%20-%20HomeBroker.pdf
+        - Brokerage shows sum values of brokerage and iss tax,
+            in Reais not percentage.
+        - B3 returns sum values of all taxes.
+            Day trade tax is set to values up to 4 million.
+            It is valid for a personnal operation, not for companies.
+        """
+        {
+        'broker': {'stock': 1.14, 'stock_day_trade':1.14, 'options':1.14},
+        'b3':{'stock':0.030589, 'stock_day_trade':0.023089, 'options':0.1340}
+        }
+        return
+
     def current_position(self):
         """ to refactor - was used for command line tests
         use the months_build_data method as web app """
@@ -624,7 +646,8 @@ class Report():
                 return (stock, values, Decimal(buy_position), Decimal(curr_position), Decimal(balance), balance_pct)
             except KeyError as e:
                 # If KeyError 'avg_price', means that no buy input was provided.
-                import pdb; pdb.set_trace()
+                print("KeyError: %s" % str(e))
+                # import pdb; pdb.set_trace()
                 raise StockNotFound
 
         print("\n\n\nCurrent prices: %s" % (self.curr_prices_dt))
