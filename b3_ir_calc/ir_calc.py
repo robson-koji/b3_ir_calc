@@ -5,12 +5,13 @@ This is only valid for Brazilian Real and B3 (Brazil stock exchange).
 Todo localization
 """
 
-
-from decimal import *
 import os, csv, re, copy, json
-from calendar import monthrange
-from collections import defaultdict
+
 from datetime import datetime, timedelta, date
+from collections import defaultdict
+from calendar import monthrange
+from io import StringIO
+from decimal import *
 
 # Options month codes
 CALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -44,6 +45,7 @@ class ObjectifyData():
         self.running_options = RunningOptions()
         self.stocks_wallet = defaultdict()
         self.illegal_operation = defaultdict(list)
+        self.ce = CorporateEvent()
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -173,10 +175,16 @@ class ObjectifyData():
                     except Exception as e:
                         raise
 
+
+
         except (IOError, OSError):
             print("Error opening / processing file")
         except StopIteration:
             pass
+
+
+        line_dt = datetime.today().date()
+        self.apply_event(line_dt)
 
         # After the last operation check if there are OTM options
         updated_options = self.running_options.chk_running_options(None)
@@ -189,14 +197,43 @@ class ObjectifyData():
             for uo in updated_options:
                 self.objectify_months(uo)
 
+    def apply_event(self, line_dt):
+        """ Apply corporate events on companies """
+        (events, date_event) =  self.ce.check_event(line_dt)
+        if events:
+            """
+            {'stock': 'BMGB11', 'event': 'desdobramento','data_ex': '11292019', 'group_valid': '1',
+            'operator': '*', 'qtt_operation': '4','stock_code_change': 'BMGB4'}
+            """
+            for event in events:
+                try:
+                    update_stock = self.stocks[event['stock']]
+                    update_stock.update_event(event)
+                    if event['stock_code_change']:
+                        # Change old stock to new stock in stock dict.
+                        self.stocks[event['stock_code_change']] = self.stocks.pop(event['stock'])
+                except:
+                    print("Error event apply: %s" % (event['stock']))
+
+            # deep copy operation values to stock_wallet.
+            # This is for corporative events.
+            # objectify_stock() calls it too. It is ok to call twice.
+            cp_stock = copy.deepcopy(update_stock.__dict__)
+            self.stocks_wallet[cp_stock['stock']] = cp_stock
+
+            # Delete applyed event
+            self.ce.delete_event(date_event)
+
+
     def objectify_stock(self, line):
         """
         Receives a csv line in dict format and create a stock object.
         Each stock object instance is a stock.
         For each line, create/update the object which returns the object __dict__
         """
-        # Create or get instance of a stock account
-        # It is populating self.stocks, a still not used dict.
+
+        self.apply_event(line['dt'])
+
         stock = self.stocks.setdefault(line['stock'], StockCheckingAccount(line['stock']))
 
         # Set operation attributes
@@ -209,6 +246,7 @@ class ObjectifyData():
             try:
                 stock.sell(**line)
             except InsufficientStocks:
+                print('InsufficientStocks:%s' % stock)
                 line['exception'] = InsufficientStocks('%s: Insufficient stocks to sale (%s)'  % (line['stock'], line['dt']))
                 self.illegal_operation[line['stock']].append(line)
                 return None
@@ -218,6 +256,7 @@ class ObjectifyData():
 
         #if cp_stock['qt_total']:
         self.stocks_wallet[cp_stock['stock']] = cp_stock
+
         return cp_stock
 
 
@@ -333,15 +372,60 @@ class RunningOptions():
         return sold_options
 
 
+class CorporateEvent():
+    scsv = """stock, event, data_ex, data_new, 'group_valid', operator, qtt_operation, stock_code_change,
+            BMGB11, desdobramento, 11292019, 11292019, 1, *, 4, BMGB4
+            BBDC3, bonificacao, 04142020, 04162020, 10, *, 1.1,
+            BBDC4, bonificacao, 04142020, 04162020, 10, *, 1.1,
+            JSLG3, conversao,09182020, 09182020, 1, , , SIMH3
+            MGLU3, desdobramento,10142020, 10162020, 1, *, 4,"""
+
+    def __init__(self):
+        f = StringIO(self.scsv)
+        reader = csv.reader(f, skipinitialspace=True, delimiter=',')
+        self.dict_ce = defaultdict(list)
+        next(reader, None)  # skip the headers
+
+        for row in reader:
+            date_ex = datetime.strptime(row[2], '%m%d%Y').date()
+            date_new = datetime.strptime(row[3], '%m%d%Y').date()
+            self.dict_ce[date_ex].append( {'stock': row[0],'event': row[1],
+                                'date_ex': row[2],'group_valid': row[4],
+                                'operator': row[5],
+                                'qtt_operation': row[6],
+                                'stock_code_change': row[7],})
+    def check_event(self, line_dt):
+        today_date = datetime.today().date()
+        remove_ce = []
+        # print(line_dt)
+        for date_event in self.dict_ce:
+            # Apply event only after the event date.
+            # Checks against all trading data, or today.
+            if date_event <= line_dt:# or date_event <= today_date:
+                return (self.dict_ce[date_event], date_event)
+        return (None, None)
+
+    def delete_event(self, event_date):
+        try:
+            del self.dict_ce[event_date]
+        except:
+            import pdb; pdb.set_trace()
+
+
 
 class StockCheckingAccount():
+    import random, operator
+
+    operators = {'+': operator.add,
+                '-': operator.sub,
+                '*': operator.mul}
+
     def __init__(self, name):
         self.name = name
         self.qt_total = 0
         self._avg_price = 0
         self._qt_total_prev = 0 # for balance
         self._avg_price_prev = 0 # for balance
-
 
     @property
     def avg_price(self):
@@ -389,12 +473,39 @@ class StockCheckingAccount():
     def sell(self, **line):
         self.profit_loss(line['qt'], line['unit_price'])
         if line['qt'] > self.qt_total:
+            # import pdb; pdb.set_trace()
             raise InsufficientStocks()
         self.qt_total -= line['qt']
         if self.qt_total == 0:
             self._qt_total_prev = 0
             self._avg_price_prev = 0
             self.avg_price = 0
+
+
+
+    def update_event(self, stock_event):
+        """
+        Update corporate event at the current position of the stock checking account.
+        {'stock': 'BMGB11', 'event': 'desdobramento', 'data_ex': '11292019', 'group_valid': '1',
+        'operator': '*', 'qtt_operation': '4', 'stock_code_change': 'BMGB4'}
+        """
+        if stock_event['event'] == 'desdobramento':
+            self.qt_total = self.operators[stock_event['operator']](
+                                self.qt_total, int(stock_event['qtt_operation']))
+            self.avg_price = Decimal(self.avg_price/int(stock_event['qtt_operation']))
+
+        elif stock_event['event'] == 'bonificacao':
+            self.qt_total = int(self.operators[stock_event['operator']](
+                                self.qt_total, Decimal(stock_event['qtt_operation'])))
+
+        # !!! This is a workaround that was working before p3 migration
+        self.__dict__['avg_price'] = self.avg_price
+        self.__dict__['avg_price_prev'] = self.avg_price_prev
+
+        if stock_event['stock_code_change']:
+             self.stock = self.name = stock_event['stock_code_change']
+
+        return None
 
     def __repr__(self):
         return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
@@ -655,7 +766,7 @@ class Report():
             if values['qt_total']:
                 try:
                     (stock, values, buy_position, curr_position, balance, balance_pct) = get_stock_position(stock, values)
-                    print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
+                    # print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
                     position.append({
                         'stock': stock,
                         'qt': values['qt_total'],
