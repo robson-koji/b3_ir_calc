@@ -189,6 +189,7 @@ class ObjectifyData():
         # After the last operation check if there are OTM options
         updated_options = self.running_options.chk_running_options(None)
         self.months_update_option(updated_options)
+        # import pdb; pdb.set_trace()
 
         return self.mm
 
@@ -212,6 +213,8 @@ class ObjectifyData():
                     if event['stock_code_change']:
                         # Change old stock to new stock in stock dict.
                         self.stocks[event['stock_code_change']] = self.stocks.pop(event['stock'])
+                        self.stocks_wallet[cp_stock['stock_code_change']] = self.stocks_wallet.pop(event['stock'])
+
                 except:
                     print("Error event apply: %s" % (event['stock']))
 
@@ -497,6 +500,9 @@ class StockCheckingAccount():
         elif stock_event['event'] == 'bonificacao':
             self.qt_total = int(self.operators[stock_event['operator']](
                                 self.qt_total, Decimal(stock_event['qtt_operation'])))
+
+            self.avg_price = self.value / self.qt_total
+            # import pdb; pdb.set_trace()
 
         # !!! This is a workaround that was working before p3 migration
         self.__dict__['avg_price'] = self.avg_price
