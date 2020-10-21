@@ -184,7 +184,9 @@ class ObjectifyData():
 
 
         line_dt = datetime.today().date()
-        self.apply_event(line_dt)
+        event = False
+        while not event:
+            event = self.apply_event(line_dt)
 
         # After the last operation check if there are OTM options
         updated_options = self.running_options.chk_running_options(None)
@@ -200,7 +202,7 @@ class ObjectifyData():
 
     def apply_event(self, line_dt):
         """ Apply corporate events on companies """
-        (events, date_event) =  self.ce.check_event(line_dt)
+        (events, date_event, last) =  self.ce.check_event(line_dt)
         if events:
             """
             {'stock': 'BMGB11', 'event': 'desdobramento','data_ex': '11292019', 'group_valid': '1',
@@ -215,22 +217,25 @@ class ObjectifyData():
                         self.stocks[event['stock_code_change']] = self.stocks.pop(event['stock'])
                         self.stocks_wallet[cp_stock['stock_code_change']] = self.stocks_wallet.pop(event['stock'])
 
+                    # deep copy operation values to stock_wallet.
+                    # This is for corporative events.
+                    # objectify_stock() calls it too. It is ok to call twice.
+                    cp_stock = copy.deepcopy(update_stock.__dict__)
+                    self.stocks_wallet[cp_stock['stock']] = cp_stock
+
                 except:
                     print("Error event apply: %s" % (event['stock']))
 
             # deep copy operation values to stock_wallet.
             # This is for corporative events.
             # objectify_stock() calls it too. It is ok to call twice.
-            try:
-                cp_stock = copy.deepcopy(update_stock.__dict__)
-                self.stocks_wallet[cp_stock['stock']] = cp_stock
-            except Exception as e:
-                # Maybe this stock is not in the wallet
-                pass
+            # cp_stock = copy.deepcopy(update_stock.__dict__)
+            # self.stocks_wallet[cp_stock['stock']] = cp_stock
 
             # Delete applyed event
             self.ce.delete_event(date_event)
-
+        if last == 1:
+            return True
 
     def objectify_stock(self, line):
         """
@@ -401,16 +406,14 @@ class CorporateEvent():
                                 'operator': row[5],
                                 'qtt_operation': row[6],
                                 'stock_code_change': row[7],})
+
     def check_event(self, line_dt):
-        today_date = datetime.today().date()
-        remove_ce = []
-        # print(line_dt)
         for date_event in self.dict_ce:
             # Apply event only after the event date.
             # Checks against all trading data, or today.
-            if date_event <= line_dt:# or date_event <= today_date:
-                return (self.dict_ce[date_event], date_event)
-        return (None, None)
+            if date_event <= line_dt:
+                return (self.dict_ce[date_event], date_event, len(self.dict_ce.keys()))
+        return (None, None, None)
 
     def delete_event(self, event_date):
         try:
