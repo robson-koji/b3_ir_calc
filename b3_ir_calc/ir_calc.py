@@ -221,8 +221,12 @@ class ObjectifyData():
             # deep copy operation values to stock_wallet.
             # This is for corporative events.
             # objectify_stock() calls it too. It is ok to call twice.
-            cp_stock = copy.deepcopy(update_stock.__dict__)
-            self.stocks_wallet[cp_stock['stock']] = cp_stock
+            try:
+                cp_stock = copy.deepcopy(update_stock.__dict__)
+                self.stocks_wallet[cp_stock['stock']] = cp_stock
+            except Exception as e:
+                # Maybe this stock is not in the wallet
+                pass
 
             # Delete applyed event
             self.ce.delete_event(date_event)
