@@ -182,10 +182,9 @@ class ObjectifyData():
         except StopIteration:
             pass
 
-
         line_dt = datetime.today().date()
         event = False
-        while not event:
+        while event == False:
             event = self.apply_event(line_dt)
 
         # After the last operation check if there are OTM options
@@ -226,14 +225,9 @@ class ObjectifyData():
                 except:
                     print("Error event apply: %s" % (event['stock']))
 
-            # deep copy operation values to stock_wallet.
-            # This is for corporative events.
-            # objectify_stock() calls it too. It is ok to call twice.
-            # cp_stock = copy.deepcopy(update_stock.__dict__)
-            # self.stocks_wallet[cp_stock['stock']] = cp_stock
-
             # Delete applyed event
             self.ce.delete_event(date_event)
+
         if last == 1:
             return True
 
