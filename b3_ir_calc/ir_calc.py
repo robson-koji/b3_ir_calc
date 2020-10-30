@@ -122,7 +122,7 @@ class ObjectifyData():
 
 
 
-    def file2object(self, csv_only=False):
+    def file2object(self, csv_only=False, stock_detail=None):
         """
         Process file line by line using the file's returned iterator
         to permit working with large files.
@@ -147,6 +147,9 @@ class ObjectifyData():
                         line = next(csv_reader)
                         line = self.read_line(line)
                         if not line:
+                            continue
+
+                        if stock_detail is not None and stock_detail != line['stock']:
                             continue
 
                         # if not 'ITSA4' in line['stock']:
@@ -244,6 +247,7 @@ class ObjectifyData():
 
         # Set operation attributes
         stock.start_operation(**line)
+        stock.calculate_position(**line)
 
         # Calculate and set instance values
         if line['buy_sell'] == 'C':
@@ -256,6 +260,7 @@ class ObjectifyData():
                 line['exception'] = InsufficientStocks('%s: Insufficient stocks to sale (%s)'  % (line['stock'], line['dt']))
                 self.illegal_operation[line['stock']].append(line)
                 return None
+
 
         # deep copy operation values
         cp_stock = copy.deepcopy(stock.__dict__)
@@ -430,6 +435,9 @@ class StockCheckingAccount():
         self._avg_price = 0
         self._qt_total_prev = 0 # for balance
         self._avg_price_prev = 0 # for balance
+        self.my_position = Decimal()
+        self.mkt_position = Decimal()
+
 
     @property
     def avg_price(self):
@@ -468,6 +476,13 @@ class StockCheckingAccount():
         # Will calculate this based on the avg_price * sell price.
         self.profit = 0
         self.loss = 0
+
+    def calculate_position(self, **line):
+        if self.qt_total > 0:
+            self.my_position = round(Decimal(self.qt_total * self._avg_price), 2)
+        else:
+            self.my_position = 0
+        self.mkt_position = round(Decimal(self.qt_total * line['unit_price']), 2)
 
     def buy(self, **line):
         self.new_avg_price(line['qt'], line['unit_price'])
