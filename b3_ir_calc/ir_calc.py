@@ -114,11 +114,12 @@ class ObjectifyData():
     def is_stock(self, asset):
         """ Whether is stock or option """
         """ There is a specific field for this on the csv """
-        pattern = '^[A-Z]{4}\d+$'
+        pattern = '^[A-Z]{5}\d+$'
         regexp = re.compile(pattern, re.IGNORECASE)
+        # import pdb; pdb.set_trace()
         if regexp.search(asset):
-            return True
-        return False
+            return False
+        return True
 
 
 
@@ -152,7 +153,7 @@ class ObjectifyData():
                         if stock_detail is not None and stock_detail != line['stock']:
                             continue
 
-                        # if not 'ITSA4' in line['stock']:
+                        # if not 'B3SA3' in line['stock']:
                         #      continue
 
                         # Whenever the months change (for each new month),
@@ -437,6 +438,7 @@ class StockCheckingAccount():
         self._avg_price_prev = 0 # for balance
         self.my_position = Decimal()
         self.mkt_position = Decimal()
+        self.unit_price = Decimal()
 
 
     @property
@@ -483,6 +485,7 @@ class StockCheckingAccount():
         else:
             self.my_position = 0
         self.mkt_position = round(Decimal(self.qt_total * line['unit_price']), 2)
+        self.unit_price = line['unit_price']
 
     def buy(self, **line):
         self.new_avg_price(line['qt'], line['unit_price'])
