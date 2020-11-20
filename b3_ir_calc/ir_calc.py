@@ -591,6 +591,18 @@ class Months():
         if previous_month:
             self._months[this_month]['cumulate_loss'] += self._months[previous_month]['cumulate_loss']
 
+
+
+    def cumulate_gain(self, this_month):
+        previous_month = self.subtract_one_month(this_month)
+        self._months[this_month]['cumulate_gain'] = self._months[this_month]['month_gain']
+        if previous_month:
+            self._months[this_month]['cumulate_gain'] += self._months[previous_month]['cumulate_loss']
+
+        if self._months[this_month]['cumulate_gain'] < 0 : self._months[this_month]['cumulate_gain'] = 0
+
+
+
     def threshold_exempt(self, this_month):
         """
         When the total amount sold on one month is less than R$20,000.00
@@ -632,15 +644,18 @@ class Months():
                 self._months[month]['month_loss'] =  balance_current_month
 
             self.cumulate_loss(month)
+            self.cumulate_gain(month)
 
-            if self.threshold_exempt(month):
-                if balance_current_month > 0:
-                    final_balance = balance_current_month + self._months[month]['cumulate_loss']
-                    if final_balance > 0:
-                        self._months[month]['cumulate_loss'] = 0
-                        self._months[month]['tax'] = self.tax_calc(Decimal(final_balance))
-                    elif final_balance <= 0:
-                        self._months[month]['cumulate_loss'] = final_balance
+            # if self.threshold_exempt(month):
+            if balance_current_month > 0:
+                final_balance = balance_current_month + self._months[month]['cumulate_loss']
+                if final_balance > 0:
+                    self._months[month]['cumulate_loss'] = 0
+                    self._months[month]['cumulate_gain'] = final_balance
+                    self._months[month]['tax'] = self.tax_calc(Decimal(final_balance))
+                elif final_balance <= 0:
+                    self._months[month]['cumulate_gain'] = 0
+                    self._months[month]['cumulate_loss'] = final_balance
 
             # print(balance_current_month)
             # print(self._months[month]['month_gain'])
