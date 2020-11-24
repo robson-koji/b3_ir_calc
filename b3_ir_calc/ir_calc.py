@@ -36,7 +36,7 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, path="files/"):
+    def __init__(self, mkt_type, file, path="files/", b3_taxes=None):
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
@@ -46,6 +46,7 @@ class ObjectifyData():
         self.stocks_wallet = defaultdict()
         self.illegal_operation = defaultdict(list)
         self.ce = CorporateEvent()
+        self.b3_taxes = b3_taxes
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -262,6 +263,7 @@ class ObjectifyData():
                 self.illegal_operation[line['stock']].append(line)
                 return None
 
+        stock.calculate_b3_taxes(self.b3_taxes, **line)
 
         # deep copy operation values
         cp_stock = copy.deepcopy(stock.__dict__)
@@ -439,6 +441,7 @@ class StockCheckingAccount():
         self.my_position = Decimal()
         self.mkt_position = Decimal()
         self.unit_price = Decimal()
+        self.b3_taxes =  Decimal()
 
 
     @property
@@ -504,6 +507,11 @@ class StockCheckingAccount():
             self.avg_price = 0
 
 
+    def calculate_b3_taxes(self, b3_taxes_def, **line):
+        # b3_taxes_def - callback function
+        b3_taxes_factor = b3_taxes_def(line['dt'])
+        self.b3_taxes = line['value'] * b3_taxes_factor
+
 
     def update_event(self, stock_event):
         """
@@ -549,7 +557,7 @@ class Months():
                                                 'month_gain':0, 'month_loss':0,
                                                 'cumulate_gain':0, 'cumulate_loss':0,
                                                 'operations':defaultdict(list),
-                                                'tax':{}})
+                                                'b3_taxes':0, 'tax':{}})
 
     def __iter__(self):
         return iter(self._months)
@@ -576,7 +584,6 @@ class Months():
 
     def subtract_one_month(self, this_month):
         """ receives current month, returns the key of previous active month """
-        self._months
         try:
             this_month_index = self.keys().index(this_month)
             if this_month_index:
@@ -636,7 +643,9 @@ class Months():
                             balance_current_month += operation['profit']
                         elif operation['loss']:
                             balance_current_month -= operation['loss']
+                    self._months[month]['b3_taxes'] += operation['b3_taxes']
 
+            self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
                 # print(operation
             if balance_current_month > 0:
                 self._months[month]['month_gain'] =  balance_current_month
@@ -754,23 +763,6 @@ class Report():
                 print(statement)
 
 
-    def brokerage_taxes(self):
-        """
-        Still static for Mirae asset only and for stock in cash.
-        Must return for each broker and for each market as well.
-        B3 Emoluments:  http://www.b3.com.br/pt_br/produtos-e-servicos/tarifas/listados-a-vista-e-derivativos/renda-variavel/tarifas-de-acoes-e-fundos-de-investimento/a-vista/
-        Mirae brokerage: https://corretora.miraeasset.com.br/new/informacoes/Custos%20e%20Taxas/Custos%20Operacionais%20-%20Taxa%20de%20Corretagem%20-%20HomeBroker.pdf
-        - Brokerage shows sum values of brokerage and iss tax,
-            in Reais not percentage.
-        - B3 returns sum values of all taxes.
-            Day trade tax is set to values up to 4 million.
-            It is valid for a personnal operation, not for companies.
-        """
-        {
-        'broker': {'stock': 1.14, 'stock_day_trade':1.14, 'options':1.14},
-        'b3':{'stock':0.030589, 'stock_day_trade':0.023089, 'options':0.1340}
-        }
-        return
 
     def current_position(self):
         """ to refactor - was used for command line tests
