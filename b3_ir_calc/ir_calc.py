@@ -36,7 +36,7 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, path="files/", b3_taxes=None):
+    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None):
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
@@ -47,6 +47,7 @@ class ObjectifyData():
         self.illegal_operation = defaultdict(list)
         self.ce = CorporateEvent()
         self.b3_taxes = b3_taxes
+        self.broker_taxes = broker_taxes
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -264,6 +265,8 @@ class ObjectifyData():
                 return None
 
         stock.calculate_b3_taxes(self.b3_taxes, **line)
+        stock.calculate_broker_taxes(self.broker_taxes, **line)
+        stock.calculate_irpf_withholding(**line)
 
         # deep copy operation values
         cp_stock = copy.deepcopy(stock.__dict__)
@@ -442,6 +445,8 @@ class StockCheckingAccount():
         self.mkt_position = Decimal()
         self.unit_price = Decimal()
         self.b3_taxes =  Decimal()
+        self.broker_taxes =  Decimal()
+        self.irpf_withholding = 0
 
 
     @property
@@ -512,6 +517,12 @@ class StockCheckingAccount():
         b3_taxes_factor = b3_taxes_def(line['dt'])
         self.b3_taxes = line['value'] * b3_taxes_factor
 
+    def calculate_broker_taxes(self, broker_taxes_def, **line):
+        broker_taxes_fees = broker_taxes_def(line['dt'])
+        self.broker_taxes = broker_taxes_fees.stock_brokering + broker_taxes_fees.stock_iss
+
+    def calculate_irpf_withholding(self, **line):
+        self.irpf_withholding = line['value'] * Decimal(0.00005)
 
     def update_event(self, stock_event):
         """
@@ -553,11 +564,12 @@ class Months():
     def __getitem__(self, month):
         # stocks = {'operations':[], 'totalization':{}}
         return self._months.setdefault(month, {'dt':datetime,
-                                                'month_buy':0, 'month_sell':0,
-                                                'month_gain':0, 'month_loss':0,
-                                                'cumulate_gain':0, 'cumulate_loss':0,
-                                                'operations':defaultdict(list),
-                                                'b3_taxes':0, 'tax':{}})
+                'month_buy':0, 'month_sell':0, 'qt_buy':0, 'qt_sell':0,
+                'month_gain':0, 'month_loss':0, 'month_net_gain':0, 'month_net_loss':0,
+                'cumulate_gain':0, 'cumulate_loss':0, 'prev_month_cumulate_loss':0,
+                'b3_taxes':0, 'broker_taxes':0, 'irpf_withholding':0, 'sum_taxes':0,
+                'tax':{},
+                'operations':defaultdict(list)})
 
     def __iter__(self):
         return iter(self._months)
@@ -594,15 +606,15 @@ class Months():
 
     def cumulate_loss(self, this_month):
         previous_month = self.subtract_one_month(this_month)
-        self._months[this_month]['cumulate_loss'] = self._months[this_month]['month_loss']
+        self._months[this_month]['cumulate_loss'] = self._months[this_month]['month_net_loss']
         if previous_month:
             self._months[this_month]['cumulate_loss'] += self._months[previous_month]['cumulate_loss']
-
+            self._months[this_month]['prev_month_cumulate_loss'] = self._months[previous_month]['cumulate_loss']
 
 
     def cumulate_gain(self, this_month):
         previous_month = self.subtract_one_month(this_month)
-        self._months[this_month]['cumulate_gain'] = self._months[this_month]['month_gain']
+        self._months[this_month]['cumulate_gain'] = self._months[this_month]['month_net_gain']
         if previous_month:
             self._months[this_month]['cumulate_gain'] += self._months[previous_month]['cumulate_loss']
 
@@ -639,25 +651,41 @@ class Months():
             for stock, values in self._months[month]['operations'].items():
                 for operation in values:
                     if operation['buy_sell'] == 'V':
+                        self._months[month]['qt_sell'] += 1
                         if operation['profit']:
                             balance_current_month += operation['profit']
                         elif operation['loss']:
                             balance_current_month -= operation['loss']
+                    else:
+                        self._months[month]['qt_buy'] += 1
                     self._months[month]['b3_taxes'] += operation['b3_taxes']
-
+                    self._months[month]['broker_taxes'] += operation['broker_taxes']
+                    self._months[month]['irpf_withholding'] += operation['irpf_withholding']
             self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
-                # print(operation
-            if balance_current_month > 0:
-                self._months[month]['month_gain'] =  balance_current_month
-            elif balance_current_month < 0:
+            self._months[month]['broker_taxes'] = round(Decimal(self._months[month]['broker_taxes']), 2)
+            self._months[month]['irpf_withholding'] = round(Decimal(self._months[month]['irpf_withholding']), 2)
+            self._months[month]['sum_taxes'] = self._months[month]['b3_taxes'] +\
+                                                    self._months[month]['broker_taxes'] +\
+                                                            self._months[month]['irpf_withholding']
+
+            balance_net_current_month = balance_current_month - self._months[month]['sum_taxes']
+
+            if balance_current_month < 0:
                 self._months[month]['month_loss'] =  balance_current_month
+            elif balance_current_month > 0:
+                self._months[month]['month_gain'] =  balance_current_month
+
+            if balance_net_current_month < 0:
+                self._months[month]['month_net_loss'] = balance_net_current_month
+            elif balance_net_current_month > 0:
+                self._months[month]['month_net_gain'] = balance_net_current_month
 
             self.cumulate_loss(month)
             self.cumulate_gain(month)
 
             # if self.threshold_exempt(month):
-            if balance_current_month > 0:
-                final_balance = balance_current_month + self._months[month]['cumulate_loss']
+            if balance_net_current_month > 0:
+                final_balance = balance_net_current_month + self._months[month]['cumulate_loss']
                 if final_balance > 0:
                     self._months[month]['cumulate_loss'] = 0
                     self._months[month]['cumulate_gain'] = final_balance
