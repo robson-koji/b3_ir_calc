@@ -36,7 +36,7 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None):
+    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None, corporate_events=None):
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
@@ -45,7 +45,7 @@ class ObjectifyData():
         self.running_options = RunningOptions()
         self.stocks_wallet = defaultdict()
         self.illegal_operation = defaultdict(list)
-        self.ce = CorporateEvent()
+        self.ce = corporate_events()
         self.b3_taxes = b3_taxes
         self.broker_taxes = broker_taxes
 
@@ -152,8 +152,13 @@ class ObjectifyData():
                         if not line:
                             continue
 
-                        if stock_detail is not None and stock_detail != line['stock']:
-                            continue
+                        # For History stock detail
+                        if stock_detail is not None:
+                            stock_detail_lst = [stock_detail]
+                            if stock_detail in self.ce.dict_deconversion_events.keys():
+                                stock_detail_lst.append(self.ce.dict_deconversion_events[stock_detail])
+                            if not line['stock'] in stock_detail_lst:
+                                continue
 
                         # if not 'B3SA3' in line['stock']:
                         #      continue
@@ -207,35 +212,51 @@ class ObjectifyData():
 
     def apply_event(self, line_dt):
         """ Apply corporate events on companies """
-        (events, date_event, last) =  self.ce.check_event(line_dt)
-        if events:
-            """
-            {'stock': 'BMGB11', 'event': 'desdobramento','data_ex': '11292019', 'group_valid': '1',
-            'operator': '*', 'qtt_operation': '4','stock_code_change': 'BMGB4'}
-            """
-            for event in events:
-                try:
-                    update_stock = self.stocks[event['stock']]
-                    update_stock.update_event(event)
-                    if event['stock_code_change']:
-                        # Change old stock to new stock in stock dict.
-                        self.stocks[event['stock_code_change']] = self.stocks.pop(event['stock'])
-                        self.stocks_wallet[cp_stock['stock_code_change']] = self.stocks_wallet.pop(event['stock'])
+        # import pdb; pdb.set_trace()
+        #(events, date_event, last) =  self.ce.check_event(line_dt)
 
-                    # deep copy operation values to stock_wallet.
-                    # This is for corporative events.
-                    # objectify_stock() calls it too. It is ok to call twice.
-                    cp_stock = copy.deepcopy(update_stock.__dict__)
-                    self.stocks_wallet[cp_stock['stock']] = cp_stock
+        list_of_events =  self.ce.check_event(line_dt)
 
-                except:
-                    print("Error event apply: %s" % (event['stock']))
+        # import pdb; pdb.set_trace()
+        for loe in list_of_events:
+            events = loe[0]
+            date_event = loe[1]
+            last = loe[2]
+            if events:
+                """
+                {'stock': 'BMGB11', 'event': 'desdobramento','data_ex': '11292019', 'group_valid': '1',
+                'operator': '*', 'qtt_operation': '4','stock_code_change': 'BMGB4'}
+                """
+                for event in events:
+                    try:
+    #                    [value for key, value in programs.items() if 'new york' in key.lower()]
+                        stock = [value for key, value in self.stocks.items() if event['stock'].lower() in key.lower()]
+                        if not stock:
+                            continue
+                        update_stock = stock[0]
+                        update_stock.update_event(event)
+                        # import pdb; pdb.set_trace()
+                        if event['asset_code_new']:
+                            # Change old stock to new stock in stock dict.
+                            self.stocks[event['asset_code_new']] = self.stocks.pop(event['asset_code_old'])
+                            self.stocks_wallet[event['asset_code_new']] = self.stocks_wallet.pop(event['asset_code_old'])
 
-            # Delete applyed event
-            self.ce.delete_event(date_event)
+                        # deep copy operation values to stock_wallet.
+                        # This is for corporative events.
+                        # objectify_stock() calls it too. It is ok to call twice.
+                        cp_stock = copy.deepcopy(update_stock.__dict__)
+                        self.stocks_wallet[event['asset_code_new']] = cp_stock
 
-        if last == 1:
-            return True
+
+                    except:
+                        print("Error event apply: %s" % (event['stock']))
+
+                # Delete applyed event
+                self.ce.delete_event(date_event)
+
+            # import pdb; pdb.set_trace()
+            if last == 1:
+                return True
 
     def objectify_stock(self, line):
         """
@@ -256,6 +277,7 @@ class ObjectifyData():
         if line['buy_sell'] == 'C':
             stock.buy(**line)
         if line['buy_sell'] == 'V':
+            # import pdb; pdb.set_trace()
             try:
                 stock.sell(**line)
             except InsufficientStocks:
@@ -389,43 +411,49 @@ class RunningOptions():
         return sold_options
 
 
-class CorporateEvent():
-    scsv = """stock, event, data_ex, data_new, 'group_valid', operator, qtt_operation, stock_code_change,
-            BMGB11, desdobramento, 11292019, 11292019, 1, *, 4, BMGB4
-            BBDC3, bonificacao, 04142020, 04162020, 10, *, 1.1,
-            BBDC4, bonificacao, 04142020, 04162020, 10, *, 1.1,
-            JSLG3, conversao,09182020, 09182020, 1, , , SIMH3
-            MGLU3, desdobramento,10142020, 10162020, 1, *, 4,"""
-
-    def __init__(self):
-        f = StringIO(self.scsv)
-        reader = csv.reader(f, skipinitialspace=True, delimiter=',')
-        self.dict_ce = defaultdict(list)
-        next(reader, None)  # skip the headers
-
-        for row in reader:
-            date_ex = datetime.strptime(row[2], '%m%d%Y').date()
-            date_new = datetime.strptime(row[3], '%m%d%Y').date()
-            self.dict_ce[date_ex].append( {'stock': row[0],'event': row[1],
-                                'date_ex': row[2],'group_valid': row[4],
-                                'operator': row[5],
-                                'qtt_operation': row[6],
-                                'stock_code_change': row[7],})
-
-    def check_event(self, line_dt):
-        for date_event in self.dict_ce:
-            # Apply event only after the event date.
-            # Checks against all trading data, or today.
-            if date_event <= line_dt:
-                return (self.dict_ce[date_event], date_event, len(self.dict_ce.keys()))
-        return (None, None, None)
-
-    def delete_event(self, event_date):
-        try:
-            del self.dict_ce[event_date]
-        except:
-            import pdb; pdb.set_trace()
-
+# class CorporateEvent():
+#     # scsv = """stock, event, data_ex, data_new, 'group_valid', operator, qtt_operation, stock_code_change,
+#     #         BMGB11, desdobramento, 11292019, 11292019, 1, *, 4, BMGB4
+#     #         BBDC3, bonificacao, 04142020, 04162020, 10, *, 1.1,
+#     #         BBDC4, bonificacao, 04142020, 04162020, 10, *, 1.1,
+#     #         JSLG3, conversao,09182020, 09182020, 1, , , SIMH3
+#     #         MGLU3, desdobramento,10142020, 10162020, 1, *, 4,
+#     #         HAPV3, desdobramento,11252020, 11272020, 1, *, 5,"""
+#
+#     def __init__(self):
+#
+#         events = CorporateEvent.objects.all()
+#
+#         """
+#         f = StringIO(self.scsv)
+#         reader = csv.reader(f, skipinitialspace=True, delimiter=',')
+#         self.dict_ce = defaultdict(list)
+#         next(reader, None)  # skip the headers
+#
+#         for row in reader:
+#             date_ex = datetime.strptime(row[2], '%m%d%Y').date()
+#             date_new = datetime.strptime(row[3], '%m%d%Y').date()
+#             self.dict_ce[date_ex].append( {'stock': row[0],'event': row[1],
+#                                 'date_ex': row[2],'group_valid': row[4],
+#                                 'operator': row[5],
+#                                 'qtt_operation': row[6],
+#                                 'stock_code_change': row[7],})
+#         """
+#
+#     def check_event(self, line_dt):
+#         for date_event in self.dict_ce:
+#             # Apply event only after the event date.
+#             # Checks against all trading data, or today.
+#             if date_event <= line_dt:
+#                 return (self.dict_ce[date_event], date_event, len(self.dict_ce.keys()))
+#         return (None, None, None)
+#
+#     def delete_event(self, event_date):
+#         try:
+#             del self.dict_ce[event_date]
+#         except:
+#             import pdb; pdb.set_trace()
+#
 
 
 class StockCheckingAccount():
@@ -546,9 +574,10 @@ class StockCheckingAccount():
         self.__dict__['avg_price'] = self.avg_price
         self.__dict__['avg_price_prev'] = self.avg_price_prev
 
-        if stock_event['stock_code_change']:
-             self.stock = self.name = stock_event['stock_code_change']
+        if stock_event['asset_code_new']:
+             self.stock = self.name = stock_event['asset_code_new']
 
+        # import pdb; pdb.set_trace()
         return None
 
     def __repr__(self):
