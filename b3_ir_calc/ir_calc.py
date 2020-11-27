@@ -160,6 +160,7 @@ class ObjectifyData():
                             if not line['stock'] in stock_detail_lst:
                                 continue
 
+
                         # if not 'B3SA3' in line['stock']:
                         #      continue
 
@@ -182,6 +183,18 @@ class ObjectifyData():
                                 del self.running_options[line['stock']]
                             else:
                                 self.running_options[line['stock']] = stock_updated_instance
+
+
+                        # if stock_detail is not None:
+                        #     line_dt = datetime.today().date()
+                        #     event = False
+                        #     while event == False:
+                        #         event = self.apply_event(line_dt)
+                        #         try:
+                        #             self.objectify_months(self.stocks_wallet[line['stock']])
+                        #         except:
+                        #             import pdb; pdb.set_trace()
+                        #             pass
 
                     except Exception as e:
                         raise
@@ -212,6 +225,7 @@ class ObjectifyData():
 
     def apply_event(self, line_dt):
         """ Apply corporate events on companies """
+        # print(self.stocks_wallet)
         # import pdb; pdb.set_trace()
         #(events, date_event, last) =  self.ce.check_event(line_dt)
 
@@ -245,7 +259,7 @@ class ObjectifyData():
                         # This is for corporative events.
                         # objectify_stock() calls it too. It is ok to call twice.
                         cp_stock = copy.deepcopy(update_stock.__dict__)
-                        self.stocks_wallet[event['asset_code_new']] = cp_stock
+                        self.stocks_wallet[stock[0].name] = cp_stock
 
 
                     except:
@@ -254,7 +268,9 @@ class ObjectifyData():
                 # Delete applyed event
                 self.ce.delete_event(date_event)
 
+            # print(self.stocks_wallet)
             # import pdb; pdb.set_trace()
+
             if last == 1:
                 return True
 
@@ -562,6 +578,13 @@ class StockCheckingAccount():
             self.qt_total = self.operators[stock_event['operator']](
                                 self.qt_total, int(stock_event['qtt_operation']))
             self.avg_price = Decimal(self.avg_price/int(stock_event['qtt_operation']))
+
+            # HAPV3 - nao funcionou
+           # O problema estah aqui no . gravado o hapv3 antes de alterar
+
+            # self.qt = self.operators[stock_event['operator']](
+            #                     self.qt, int(stock_event['qtt_operation']))
+            # self.unit_price = Decimal(self.unit_price/int(stock_event['qtt_operation']))
 
         elif stock_event['event'] == 'bonificacao':
             self.qt_total = int(self.operators[stock_event['operator']](
