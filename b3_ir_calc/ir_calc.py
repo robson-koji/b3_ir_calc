@@ -214,9 +214,14 @@ class ObjectifyData():
         # After the last operation check if there are OTM options
         updated_options = self.running_options.chk_running_options(None)
         self.months_update_option(updated_options)
-        # import pdb; pdb.set_trace()
+
+
+        # DayTrade - self.mm has all months and daytrades
+        # keys = list(self.mm[202003]['dayt']._has_dayts.keys())
+        # print(self.mm[202003]['dayt'][keys[0]])
 
         return self.mm
+        # self.mm[202011]['dayt']._dayts['2020-11-3']
 
     def months_update_option(self, updated_options):
         if updated_options:
@@ -318,6 +323,7 @@ class ObjectifyData():
     def objectify_months(self, stock_updated_instance):
         #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
         month = stock_updated_instance['year_month_id']
+        # Initialize month object
         month_dict = self.mm[month]
         # Set operation attributes
         self.mm.month_populate(month, stock_updated_instance)
@@ -608,6 +614,123 @@ class StockCheckingAccount():
                     .format(self.name, self.dt, self.qt_total, self.avg_price, self.profit, self.loss)
 
 
+class DayTrade():
+    def __init__(self, mkt_type):
+        self._dayts = {}
+        self.mkt_type = mkt_type
+        #self._has_dayts = defaultdict(lambda: {'operations':[]})
+        self._has_dayts = defaultdict(dict)
+
+    def __getitem__(self, date):
+        return self._dayts.setdefault(date, defaultdict(lambda: {
+                                        'operations':[],
+                                        'qt_total_sold_dayt': 0, 'qt_total_bought_dayt': 0,
+                                        'total_amount_sold_dayt': Decimal(), 'total_amount_bought_dayt': Decimal(),
+                                        'has_bought': False, 'has_sold': False,
+                                        'avg_price_bought':Decimal(), 'avg_price_sold':Decimal()}))
+    def __iter__(self):
+        return iter(self._dayts)
+
+    def get_day(self, dt):
+        return self._dayts[dt]
+
+    def keys(self):
+        return sorted(self._dayts.keys())
+
+    def dayt_populate(self, stock_updated_instance):
+        date = stock_updated_instance['dt']
+        stock = stock_updated_instance['stock']
+        buy_sell = stock_updated_instance['buy_sell']
+        dayt_dict = self._dayts[date]
+        dayt_dict[stock]['operations'].append(stock_updated_instance)
+
+        if buy_sell == 'C':
+            dayt_dict[stock]['has_bought'] = True
+            dayt_dict[stock]['qt_total_bought_dayt'] += stock_updated_instance['qt']
+            dayt_dict[stock]['total_amount_bought_dayt'] += stock_updated_instance['value']
+            if not dayt_dict[stock]['avg_price_bought']:
+                dayt_dict[stock]['avg_price_bought'] = stock_updated_instance['unit_price']
+            else:
+                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + stock_updated_instance['unit_price'])/2
+
+        elif buy_sell == 'V':
+            dayt_dict[stock]['has_sold'] = True
+            dayt_dict[stock]['qt_total_sold_dayt'] += stock_updated_instance['qt']
+            dayt_dict[stock]['total_amount_sold_dayt'] += stock_updated_instance['value']
+            if not dayt_dict[stock]['avg_price_sold']:
+                dayt_dict[stock]['avg_price_sold'] = stock_updated_instance['unit_price']
+            else:
+                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + stock_updated_instance['unit_price'])/2
+
+        if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
+            # print("%s: %s" % (str(date), str(stock)))
+            self._has_dayts[date][stock] = dayt_dict[stock]
+
+
+    """
+    Functions bellow to consolidate daytrades checking account.
+    """
+    def dayt_close_daytrade(self, stock_dayt):
+        """
+        Will be a bug here. Need to pre-process, because here, daytrade is only checked
+        after calculate avg price on StockCheckingAccount.
+        When the system realizes that an operation is a daytrade, it is too late for
+        avg price.
+        """
+        balance_stock_dayts = 0
+        if stock_dayt['qt_dayt'] == 0:
+            # Daytrade operation only
+            balance_stock_dayts = stock_dayt['total_amount_sold_dayt'] - stock_dayt['total_amount_bought_dayt']
+        elif stock_dayt['qt_dayt'] > 0:
+            # Daytrade operation plus long position. Bought stocks into the wallet.
+            # To calculate this, it needs to buy stocks up to the total amount sold.
+            # The rest goes to the long position, outside daytrade realm.
+            amount_bought = stock_dayt['avg_price_bought'] * stock_dayt['qt_total_sold_dayt']
+            balance_stock_dayts = stock_dayt['total_amount_sold_dayt'] - amount_bought
+        elif stock_dayt['qt_dayt'] < 0:
+            # Daytrade operation plus selling position.
+            # To calculate this, it needs to sell stocks up to the total amount bought.
+            # The rest goes to the selling position, outside daytrade realm.
+            # Sell only the ammount bought.
+            amount_sold = stock_dayt['avg_price_sold'] * stock_dayt['qt_total_bought_dayt']
+            balance_stock_dayts = amount_sold - stock_dayt['total_amount_bought_dayt']
+
+        # print(balance_stock_dayts)
+        # import pdb; pdb.set_trace()
+        # !!! Calcular a sobra das operacoes do daytrade, qdo compra mais do que vende, ou vende
+        # mais do que compra no daytrade.
+
+    def dayt_consolidate_by_stock(self, stock_dayt):
+        # for stock, values in self._months[month]['operations'].items():
+        qt_total_bought_dayt = stock_dayt['qt_total_bought_dayt']
+        qt_total_sold_dayt = stock_dayt['qt_total_sold_dayt']
+
+        # Store amount of stocks daytraded
+        # If positive, more buy else if negative, more sell.
+        stock_dayt['qt_dayt'] = qt_total_bought_dayt - qt_total_sold_dayt
+
+        self.dayt_close_daytrade(stock_dayt)
+
+            # print(operation)
+        # print(stock_dayt['qt_total_bought_dayt'])
+        # print(stock_dayt['qt_total_sold_dayt'])
+        # print(stock_dayt['qt_dayt'])
+
+
+
+    def dayt_consolidate(self):
+        for day in self._has_dayts.keys():
+            print(day)
+            for stock in self._has_dayts[day]:
+                stock_dayt = self._has_dayts[day][stock]
+
+                print(stock)
+                self.dayt_consolidate_by_stock(stock_dayt)
+
+            print
+
+
+
 class Months():
     def __init__(self, mkt_type):
         self._months = {}
@@ -620,8 +743,7 @@ class Months():
                 'month_gain':0, 'month_loss':0, 'month_net_gain':0, 'month_net_loss':0,
                 'cumulate_gain':0, 'cumulate_loss':0, 'prev_month_cumulate_loss':0,
                 'b3_taxes':0, 'broker_taxes':0, 'irpf_withholding':0, 'sum_taxes':0,
-                'tax':{},
-                'operations':defaultdict(list)})
+                'tax':{}, 'operations':defaultdict(list), 'dayt': DayTrade(self.mkt_type)})
 
     def __iter__(self):
         return iter(self._months)
@@ -636,8 +758,17 @@ class Months():
         line = stock_updated_instance
         # if 'BMGB' in line['stock']:
         #     import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
+
         month_dict = self._months[month]
         month_dict['dt'] = line['dt']
+
+        #  Start check Day Trade
+        #dayt_dict = month_dict['dayt'].__getitem__(line['dt'], line['stock'])
+        dayt_dict = month_dict['dayt'][line['dt']]
+        # import pdb; pdb.set_trace()
+        month_dict['dayt'].dayt_populate(stock_updated_instance)
+        #  End check Day Trade
 
         if (line['buy_sell'] == 'C'):
             month_dict['month_buy'] += line['value']
@@ -686,6 +817,9 @@ class Months():
         #import pdb; pdb.set_trace()
         return {'final_balance':final_balance, 'tax_amount': final_balance * Decimal(0.15)}
 
+
+
+
     def month_add_detail(self):
         """
         Add gain, loss for all months.
@@ -699,6 +833,13 @@ class Months():
             balance_current_month = 0
             # if self._months[month]['month_sell'] > 20000:
             # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
+
+            self._months[month]['dayt'].dayt_consolidate()
+
+            #print(self._months[month]['dayt']._has_dayts.keys())
+            # keys = list(self.mm[202003]['dayt']._has_dayts.keys())
+
+            # import pdb; pdb.set_trace()
 
             for stock, values in self._months[month]['operations'].items():
                 for operation in values:
@@ -915,6 +1056,8 @@ class Report():
                     print(err['exception'])
 
 
+# Call from command line not working anymore.
+# Lots of API changes.
 if __name__ == "__main__":
     import argparse
     illegal_operations = []
