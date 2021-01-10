@@ -48,6 +48,8 @@ class ObjectifyData():
         self.ce = corporate_events()
         self.b3_taxes = b3_taxes
         self.broker_taxes = broker_taxes
+        self._dayts = DayTrade(mkt_type)
+        self.change_day = None
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -175,11 +177,12 @@ class ObjectifyData():
                         stock_updated_instance = self.objectify_stock(line)
                         if not stock_updated_instance:
                             continue
+                        self.objectify_day(stock_updated_instance)
                         self.objectify_months(stock_updated_instance)
 
                         # Create or remove a running option.
                         if not self.is_stock(line['stock']): # If is option
-                            if stock_updated_instance['qt_total'] == 0:
+                            if stock_updated_instance.qt_total == 0:
                                 del self.running_options[line['stock']]
                             else:
                                 self.running_options[line['stock']] = stock_updated_instance
@@ -312,17 +315,70 @@ class ObjectifyData():
         stock.calculate_irpf_withholding(**line)
 
         # deep copy operation values
-        cp_stock = copy.deepcopy(stock.__dict__)
+        # cp_stock = copy.deepcopy(stock.__dict__)
+        cp_stock = copy.deepcopy(stock)
+
+        # import pdb; pdb.set_trace()
 
         #if cp_stock['qt_total']:
-        self.stocks_wallet[cp_stock['stock']] = cp_stock
+        self.stocks_wallet[cp_stock.stock] = cp_stock
 
         return cp_stock
 
 
+    def objectify_day(self, stock_updated_instance):
+        """
+        This is for dt calculation.  We dont care about intraday operation,
+        so they are discharged but while daytrade
+        """
+
+
+        """ !!! Faz o seguinte. Cria um objeto day, se nao tiver dayt, manda no
+        objectify month. Se tiver dayt, recalcula o objeto day antes de mandar.
+        """
+
+        date = stock_updated_instance.dt
+        stock = stock_updated_instance.stock
+        buy_sell = stock_updated_instance.buy_sell
+        dayt_dict = self._dayts[date]
+
+        if buy_sell == 'C':
+            dayt_dict[stock]['has_bought'] = True
+        elif buy_sell == 'V':
+            dayt_dict[stock]['has_sold'] = True
+
+        if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
+            pass
+            # import pdb; pdb.set_trace()
+
+            #self._has_dayts[date][stock] = dayt_dict[stock]
+            #self.dayt.day_populate(day, stock_updated_instance)
+
+        """ Populate day data structure """
+        # ---
+
+        if self.change_day is not None and self.change_day != date:
+            """ Day has changed. """
+
+            """ Check if has day trade. If true, recalculate day data """
+            # ---
+
+            """ Call month object and add days """
+            # ---
+            pass
+            # import pdb; pdb.set_trace()
+
+
+        self.change_day = date
+
+
+
+
+
+
     def objectify_months(self, stock_updated_instance):
         #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
-        month = stock_updated_instance['year_month_id']
+        month = stock_updated_instance.year_month_id
         # Initialize month object
         month_dict = self.mm[month]
         # Set operation attributes
@@ -488,9 +544,9 @@ class StockCheckingAccount():
     def __init__(self, name):
         self.name = name
         self.qt_total = 0
-        self._avg_price = 0
-        self._qt_total_prev = 0 # for balance
-        self._avg_price_prev = 0 # for balance
+        self.avg_price = 0
+        self.qt_total_prev = 0 # for balance
+        self.avg_price_prev = 0 # for balance
         self.my_position = Decimal()
         self.mkt_position = Decimal()
         self.unit_price = Decimal()
@@ -511,17 +567,26 @@ class StockCheckingAccount():
     def avg_price_prev(self):
         return self._avg_price_prev
 
+    @avg_price_prev.setter
+    def avg_price_prev(self, avg_price):
+        self._avg_price_prev = avg_price
+
+    @property
+    def qt_total_prev(self):
+        return self._qt_total_prev
+
+    @qt_total_prev.setter
+    def qt_total_prev(self, qt_total):
+        self._qt_total_prev = qt_total
+
 
     def new_avg_price(self, qt, unit_price):
         current_position = self.qt_total * self.avg_price
         new_dock = qt * unit_price
         new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
-        self._avg_price_prev = self.avg_price
+        self.avg_price_prev = self.avg_price
         self.avg_price = new_avg_price
 
-        # !!! This is a workaround that was working before p3 migration
-        self.__dict__['avg_price'] = self.avg_price
-        self.__dict__['avg_price_prev'] = self.avg_price_prev
 
     def profit_loss(self, qt, unit_price):
         if unit_price <= self.avg_price:
@@ -539,7 +604,7 @@ class StockCheckingAccount():
 
     def calculate_position(self, **line):
         if self.qt_total > 0:
-            self.my_position = round(Decimal(self.qt_total * self._avg_price), 2)
+            self.my_position = round(Decimal(self.qt_total * self.avg_price), 2)
         else:
             self.my_position = 0
         self.mkt_position = round(Decimal(self.qt_total * line['unit_price']), 2)
@@ -547,7 +612,7 @@ class StockCheckingAccount():
 
     def buy(self, **line):
         self.new_avg_price(line['qt'], line['unit_price'])
-        self._qt_total_prev = self.qt_total
+        self.qt_total_prev = self.qt_total
         self.qt_total += line['qt']
 
     def sell(self, **line):
@@ -557,8 +622,8 @@ class StockCheckingAccount():
             raise InsufficientStocks()
         self.qt_total -= line['qt']
         if self.qt_total == 0:
-            self._qt_total_prev = 0
-            self._avg_price_prev = 0
+            self.qt_total_prev = 0
+            self.avg_price_prev = 0
             self.avg_price = 0
 
 
@@ -599,10 +664,6 @@ class StockCheckingAccount():
             self.avg_price = self.value / self.qt_total
             # import pdb; pdb.set_trace()
 
-        # !!! This is a workaround that was working before p3 migration
-        self.__dict__['avg_price'] = self.avg_price
-        self.__dict__['avg_price_prev'] = self.avg_price_prev
-
         if stock_event['asset_code_new']:
              self.stock = self.name = stock_event['asset_code_new']
 
@@ -638,29 +699,29 @@ class DayTrade():
         return sorted(self._dayts.keys())
 
     def dayt_populate(self, stock_updated_instance):
-        date = stock_updated_instance['dt']
-        stock = stock_updated_instance['stock']
-        buy_sell = stock_updated_instance['buy_sell']
+        date = stock_updated_instance.dt
+        stock = stock_updated_instance.stock
+        buy_sell = stock_updated_instance.buy_sell
         dayt_dict = self._dayts[date]
         dayt_dict[stock]['operations'].append(stock_updated_instance)
 
         if buy_sell == 'C':
             dayt_dict[stock]['has_bought'] = True
-            dayt_dict[stock]['qt_total_bought_dayt'] += stock_updated_instance['qt']
-            dayt_dict[stock]['total_amount_bought_dayt'] += stock_updated_instance['value']
+            dayt_dict[stock]['qt_total_bought_dayt'] += stock_updated_instance.qt
+            dayt_dict[stock]['total_amount_bought_dayt'] += stock_updated_instance.value
             if not dayt_dict[stock]['avg_price_bought']:
-                dayt_dict[stock]['avg_price_bought'] = stock_updated_instance['unit_price']
+                dayt_dict[stock]['avg_price_bought'] = stock_updated_instance.unit_price
             else:
-                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + stock_updated_instance['unit_price'])/2
+                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + stock_updated_instance.unit_price)/2
 
         elif buy_sell == 'V':
             dayt_dict[stock]['has_sold'] = True
-            dayt_dict[stock]['qt_total_sold_dayt'] += stock_updated_instance['qt']
-            dayt_dict[stock]['total_amount_sold_dayt'] += stock_updated_instance['value']
+            dayt_dict[stock]['qt_total_sold_dayt'] += stock_updated_instance.qt
+            dayt_dict[stock]['total_amount_sold_dayt'] += stock_updated_instance.value
             if not dayt_dict[stock]['avg_price_sold']:
-                dayt_dict[stock]['avg_price_sold'] = stock_updated_instance['unit_price']
+                dayt_dict[stock]['avg_price_sold'] = stock_updated_instance.unit_price
             else:
-                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + stock_updated_instance['unit_price'])/2
+                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + stock_updated_instance.unit_price)/2
 
         if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
             # print("%s: %s" % (str(date), str(stock)))
@@ -685,6 +746,8 @@ class DayTrade():
             # Daytrade operation plus long position. Bought stocks into the wallet.
             # To calculate this, it needs to buy stocks up to the total amount sold.
             # The rest goes to the long position, outside daytrade realm.
+            # Remove all sold position for this day, this stocks
+            # Remove bought position up to the sold operations
             amount_bought = stock_dayt['avg_price_bought'] * stock_dayt['qt_total_sold_dayt']
             balance_stock_dayts = stock_dayt['total_amount_sold_dayt'] - amount_bought
         elif stock_dayt['qt_dayt'] < 0:
@@ -692,15 +755,31 @@ class DayTrade():
             # To calculate this, it needs to sell stocks up to the total amount bought.
             # The rest goes to the selling position, outside daytrade realm.
             # Sell only the ammount bought.
+            # Remove all bought position for this day, this stocks
+            # Remove sold position up to the bought operations
             amount_sold = stock_dayt['avg_price_sold'] * stock_dayt['qt_total_bought_dayt']
             balance_stock_dayts = amount_sold - stock_dayt['total_amount_bought_dayt']
 
+
+        """
+        AQUI
+        !!! day_t - Retomar daqui
+        !!!
+
+        !!! Remover a sobra do dia em StockCheckingAccount
+        sobra: stock_dayt['qt_dayt']
+
+        !!! Refazer o calculo de dt.
+        Ao inves de partir do mes, partir do ObjectifyData para nao dar o bug de preprocessamento.
+        Qdo detectar um dt, montar uma classe que calcule separadamente e que crie uma ordem
+        virtual qdo houver sobra (positiva ou negativa) do dt.
+        """
         # print(balance_stock_dayts)
+        # print( stock_dayt['qt_dayt'] )
         # import pdb; pdb.set_trace()
-        # !!! Calcular a sobra das operacoes do daytrade, qdo compra mais do que vende, ou vende
-        # mais do que compra no daytrade.
 
     def dayt_consolidate_by_stock(self, stock_dayt):
+        """ Check daytrade by day, by stock """
         # for stock, values in self._months[month]['operations'].items():
         qt_total_bought_dayt = stock_dayt['qt_total_bought_dayt']
         qt_total_sold_dayt = stock_dayt['qt_total_sold_dayt']
@@ -728,6 +807,8 @@ class DayTrade():
                 self.dayt_consolidate_by_stock(stock_dayt)
 
             print
+        if self._has_dayts.keys():
+            return True
 
 
 
@@ -761,21 +842,21 @@ class Months():
         # import pdb; pdb.set_trace()
 
         month_dict = self._months[month]
-        month_dict['dt'] = line['dt']
+        month_dict['dt'] = line.dt
 
         #  Start check Day Trade
         #dayt_dict = month_dict['dayt'].__getitem__(line['dt'], line['stock'])
-        dayt_dict = month_dict['dayt'][line['dt']]
+        dayt_dict = month_dict['dayt'][line.dt]
         # import pdb; pdb.set_trace()
         month_dict['dayt'].dayt_populate(stock_updated_instance)
         #  End check Day Trade
 
-        if (line['buy_sell'] == 'C'):
-            month_dict['month_buy'] += line['value']
-        elif (line['buy_sell'] == 'V'):
-            month_dict['month_sell'] += line['value']
+        if (line.buy_sell == 'C'):
+            month_dict['month_buy'] += line.value
+        elif (line.buy_sell == 'V'):
+            month_dict['month_sell'] += line.value
         if stock_updated_instance is not None:
-            month_dict['operations'][line['stock']].append(stock_updated_instance)
+            month_dict['operations'][line.stock].append(stock_updated_instance)
 
     def subtract_one_month(self, this_month):
         """ receives current month, returns the key of previous active month """
@@ -828,32 +909,34 @@ class Months():
         # import pdb; pdb.set_trace()
         for month in self.keys():
             # print("\n\n"
-            # print(month
+            # print(month)
+            # import pdb; pdb.set_trace()
 
             balance_current_month = 0
             # if self._months[month]['month_sell'] > 20000:
             # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
 
-            self._months[month]['dayt'].dayt_consolidate()
+            has_dayts = self._months[month]['dayt'].dayt_consolidate()
 
             #print(self._months[month]['dayt']._has_dayts.keys())
             # keys = list(self.mm[202003]['dayt']._has_dayts.keys())
 
-            # import pdb; pdb.set_trace()
+            # if has_dayts:
+            #     import pdb; pdb.set_trace()
 
             for stock, values in self._months[month]['operations'].items():
                 for operation in values:
-                    if operation['buy_sell'] == 'V':
+                    if operation.buy_sell == 'V':
                         self._months[month]['qt_sell'] += 1
-                        if operation['profit']:
-                            balance_current_month += operation['profit']
-                        elif operation['loss']:
-                            balance_current_month -= operation['loss']
+                        if operation.profit:
+                            balance_current_month += operation.profit
+                        elif operation.loss:
+                            balance_current_month -= operation.loss
                     else:
                         self._months[month]['qt_buy'] += 1
-                    self._months[month]['b3_taxes'] += operation['b3_taxes']
-                    self._months[month]['broker_taxes'] += operation['broker_taxes']
-                    self._months[month]['irpf_withholding'] += operation['irpf_withholding']
+                    self._months[month]['b3_taxes'] += operation.b3_taxes
+                    self._months[month]['broker_taxes'] += operation.broker_taxes
+                    self._months[month]['irpf_withholding'] += operation.irpf_withholding
             self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
             self._months[month]['broker_taxes'] = round(Decimal(self._months[month]['broker_taxes']), 2)
             self._months[month]['irpf_withholding'] = round(Decimal(self._months[month]['irpf_withholding']), 2)
@@ -928,19 +1011,19 @@ class Report():
         if len(values) == 1:
             operation = values[0]
 
-            statement = {'qt_total_start':operation['_qt_total_prev'],
-                         'avg_price_start':operation['_avg_price_prev'],
+            statement = {'qt_total_start':operation.qt_total_prev,
+                         'avg_price_start':operation.avg_price_prev,
                          'ops':[operation],
-                         'qt_total_end':operation['qt_total'],
-                         'avg_price_end':operation['avg_price'] }
+                         'qt_total_end':operation.qt_total,
+                         'avg_price_end':operation.avg_price }
         elif len(values) > 1:
             operation_start = values[0]
             operation_end = values[-1]
-            statement = {'qt_total_start':operation_start['_qt_total_prev'],
-                         'avg_price_start':operation_start['_avg_price_prev'],
+            statement = {'qt_total_start':operation_start.qt_total_prev,
+                         'avg_price_start':operation_start.avg_price_prev,
                          'ops':values,
-                         'qt_total_end':operation_end['qt_total'],
-                         'avg_price_end':operation_end['avg_price'] }
+                         'qt_total_end':operation_end.qt_total,
+                         'avg_price_end':operation_end.avg_price }
         return statement
 
 
@@ -998,12 +1081,12 @@ class Report():
         def get_stock_position(stock, values):
             try:
                 current_price = self.current_prices[stock]
-                buy_position = values['qt_total'] * values['avg_price']
+                buy_position = values.qt_total * values.avg_price
 
                 if current_price['price']=='None':
                     raise StockNotFound
 
-                curr_position = values['qt_total'] * round(Decimal(current_price['price']), 2)
+                curr_position = values.qt_total * round(Decimal(current_price['price']), 2)
                 balance = curr_position - buy_position
                 balance_pct = round((balance * 100 / buy_position), 2)
                 # import pdb; pdb.set_trace()
@@ -1016,14 +1099,14 @@ class Report():
 
         print("\n\n\nCurrent prices: %s" % (self.curr_prices_dt))
         for stock, values in self.stocks_wallet.items():
-            if values['qt_total']:
+            if values.qt_total:
                 try:
                     (stock, values, buy_position, curr_position, balance, balance_pct) = get_stock_position(stock, values)
-                    # print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values['qt_total'], values['avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
+                    # print("%s: Qt:%d - Buy avg: R$%.2f - Cur Price: R$%s - Buy Total: R$%.2f - Cur Total: R$%.2f - Balance: R$%.2f ( %.2f%s )" % (stock, values.qt_total'], values.avg_price'], self.current_prices[stock]['price'], buy_position, curr_position, balance, balance_pct, '%'))
                     position.append({
                         'stock': stock,
-                        'qt': values['qt_total'],
-                        'buy_avg': values['avg_price'],
+                        'qt': values.qt_total,
+                        'buy_avg': values.avg_price,
                         'curr_price': self.current_prices[stock]['price'],
                         'buy_total':buy_position,
                         'cur_total':curr_position,
@@ -1038,8 +1121,8 @@ class Report():
                     # import pdb; pdb.set_trace()
 
                 except StockNotFound:
-                    values['exception'] = StockNotFound('%s: StockNotFound (%s)'  % (values['stock'], values['dt']))
-                    self.illegal_operation[values['stock']].append(values)
+                    values.exception = StockNotFound('%s: StockNotFound (%s)'  % (values.stock, values.dt))
+                    self.illegal_operation[values.stock].append(values)
         # import pdb; pdb.set_trace()
         if not summary['buy_total'] == 0:
             summary['balance_pct'] =  (100 * (summary['cur_total'] - summary['buy_total'])) / summary['buy_total']
