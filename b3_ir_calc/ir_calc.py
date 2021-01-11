@@ -48,8 +48,11 @@ class ObjectifyData():
         self.ce = corporate_events()
         self.b3_taxes = b3_taxes
         self.broker_taxes = broker_taxes
-        self._dayts = DayTrade(mkt_type)
-        self.change_day = None
+        self.previous_day = None
+        self.days =  defaultdict(lambda: defaultdict(list))
+        #self.has_dayt =  defaultdict(lambda: defaultdict(lambda: defaultdict()))
+        self.has_dayt =  defaultdict(lambda: defaultdict(lambda: {'has_sold':False, 'has_bought':False}))
+        self.dayt = DayTrade(self.mkt_type)
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -163,8 +166,12 @@ class ObjectifyData():
                                 continue
 
 
-                        # if not 'B3SA3' in line['stock']:
+                        # if not 'IRBR3' in line['stock']:
                         #      continue
+                        # import pdb; pdb.set_trace()
+
+                        # if line['year_month_id'] != 202003:
+                        #     continue
 
                         # Whenever the months change (for each new month),
                         # verify option expiration (OTM)
@@ -174,18 +181,21 @@ class ObjectifyData():
                                 self.months_update_option(updated_options)
 
                         # Objectify stock and months
-                        stock_updated_instance = self.objectify_stock(line)
-                        if not stock_updated_instance:
-                            continue
-                        self.objectify_day(stock_updated_instance)
-                        self.objectify_months(stock_updated_instance)
+                        # stock_updated_instance = self.objectify_stock(line)
+                        # if not stock_updated_instance:
+                        #     continue
+                        self.verify_intraday(line)
+                        # self.objectify_months(stock_updated_instance)
 
+                        """
+                        Todo
                         # Create or remove a running option.
                         if not self.is_stock(line['stock']): # If is option
                             if stock_updated_instance.qt_total == 0:
                                 del self.running_options[line['stock']]
                             else:
                                 self.running_options[line['stock']] = stock_updated_instance
+                        """
 
 
                         # if stock_detail is not None:
@@ -217,6 +227,12 @@ class ObjectifyData():
         # After the last operation check if there are OTM options
         updated_options = self.running_options.chk_running_options(None)
         self.months_update_option(updated_options)
+
+
+        # After the last operation, insert last not insert day on month
+        self.previous_day = line['dt']
+        #self.objectify_months(stock_updated_instance.dt)
+        self.reconcile_day()
 
 
         # DayTrade - self.mm has all months and daytrades
@@ -326,58 +342,59 @@ class ObjectifyData():
         return cp_stock
 
 
-    def objectify_day(self, stock_updated_instance):
+    def reconcile_day(self):
+        """ Check if previous day has day trade """
+        for stock in self.dayt._has_dayts[self.previous_day].keys():
+            """ If stock has daytrade """
+            if 'operations' in self.dayt[self.previous_day][stock]:
+                """ remove from month regular trades """
+                self.days[self.previous_day].pop(stock)
+
+                """ !!! Aqui, consolidando e printando daytrade """
+                self.dayt.dayt_consolidate()
+
+        # Cleanup daytrade objects
+        del self.dayt[self.previous_day]
+        del self.dayt._has_dayts[self.previous_day]
+
+
+        """ Objectify stocks and add operations to month """
+        for stock in self.days[self.previous_day]:
+            for line in self.days[self.previous_day][stock]:
+                stock_updated_instance = self.objectify_stock(line)
+                if not stock_updated_instance:
+                    continue
+
+                """ Call month object and add regular trades """
+                self.objectify_months( stock_updated_instance )
+
+
+    def verify_intraday(self, line):
         """
-        This is for dt calculation.  We dont care about intraday operation,
-        so they are discharged but while daytrade
+        Group stocks by day, check daytrade, objectify stocks and send to month.
+        We dont care about intraday operation, so they are discharged but while daytrade
         """
+        date = line['dt']
+        stock = line['stock']
+        buy_sell = line['buy_sell']
 
-
-        """ !!! Faz o seguinte. Cria um objeto day, se nao tiver dayt, manda no
-        objectify month. Se tiver dayt, recalcula o objeto day antes de mandar.
-        """
-
-        date = stock_updated_instance.dt
-        stock = stock_updated_instance.stock
-        buy_sell = stock_updated_instance.buy_sell
-        dayt_dict = self._dayts[date]
-
-        if buy_sell == 'C':
-            dayt_dict[stock]['has_bought'] = True
-        elif buy_sell == 'V':
-            dayt_dict[stock]['has_sold'] = True
-
-        if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
-            pass
-            # import pdb; pdb.set_trace()
-
-            #self._has_dayts[date][stock] = dayt_dict[stock]
-            #self.dayt.day_populate(day, stock_updated_instance)
+        """ Start daytrade objects """
+        self.dayt[date]
+        self.dayt.dayt_populate(line)
 
         """ Populate day data structure """
-        # ---
+        self.days[date][stock].append(line)
 
-        if self.change_day is not None and self.change_day != date:
-            """ Day has changed. """
+        """ Day has changed. Reconcile day. """
+        if self.previous_day is not None and date != self.previous_day:
+            self.days[self.previous_day][stock].reverse()
+            self.reconcile_day()
 
-            """ Check if has day trade. If true, recalculate day data """
-            # ---
-
-            """ Call month object and add days """
-            # ---
-            pass
-            # import pdb; pdb.set_trace()
-
-
-        self.change_day = date
-
-
-
+        self.previous_day = date
 
 
 
     def objectify_months(self, stock_updated_instance):
-        #line_dict = {'year_month_id':year_month_id, 'dt':dt, 'stock':stock, 'value':value, 'buy_sell': buy_sell }
         month = stock_updated_instance.year_month_id
         # Initialize month object
         month_dict = self.mm[month]
@@ -675,6 +692,7 @@ class StockCheckingAccount():
                     .format(self.name, self.dt, self.qt_total, self.avg_price, self.profit, self.loss)
 
 
+
 class DayTrade():
     def __init__(self, mkt_type):
         self._dayts = {}
@@ -689,6 +707,11 @@ class DayTrade():
                                         'total_amount_sold_dayt': Decimal(), 'total_amount_bought_dayt': Decimal(),
                                         'has_bought': False, 'has_sold': False,
                                         'avg_price_bought':Decimal(), 'avg_price_sold':Decimal()}))
+
+
+    def __delitem__(self, key):
+        del self._dayts[key]
+
     def __iter__(self):
         return iter(self._dayts)
 
@@ -698,30 +721,30 @@ class DayTrade():
     def keys(self):
         return sorted(self._dayts.keys())
 
-    def dayt_populate(self, stock_updated_instance):
-        date = stock_updated_instance.dt
-        stock = stock_updated_instance.stock
-        buy_sell = stock_updated_instance.buy_sell
+    def dayt_populate(self, line):
+        date = line['dt']
+        stock = line['stock']
+        buy_sell = line['buy_sell']
         dayt_dict = self._dayts[date]
-        dayt_dict[stock]['operations'].append(stock_updated_instance)
+        dayt_dict[stock]['operations'].append(line)
 
         if buy_sell == 'C':
             dayt_dict[stock]['has_bought'] = True
-            dayt_dict[stock]['qt_total_bought_dayt'] += stock_updated_instance.qt
-            dayt_dict[stock]['total_amount_bought_dayt'] += stock_updated_instance.value
+            dayt_dict[stock]['qt_total_bought_dayt'] += line['qt']
+            dayt_dict[stock]['total_amount_bought_dayt'] += line['value']
             if not dayt_dict[stock]['avg_price_bought']:
-                dayt_dict[stock]['avg_price_bought'] = stock_updated_instance.unit_price
+                dayt_dict[stock]['avg_price_bought'] = line['unit_price']
             else:
-                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + stock_updated_instance.unit_price)/2
+                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + line['unit_price'])/2
 
         elif buy_sell == 'V':
             dayt_dict[stock]['has_sold'] = True
-            dayt_dict[stock]['qt_total_sold_dayt'] += stock_updated_instance.qt
-            dayt_dict[stock]['total_amount_sold_dayt'] += stock_updated_instance.value
+            dayt_dict[stock]['qt_total_sold_dayt'] += line['qt']
+            dayt_dict[stock]['total_amount_sold_dayt'] += line['value']
             if not dayt_dict[stock]['avg_price_sold']:
-                dayt_dict[stock]['avg_price_sold'] = stock_updated_instance.unit_price
+                dayt_dict[stock]['avg_price_sold'] = line['unit_price']
             else:
-                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + stock_updated_instance.unit_price)/2
+                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + line['unit_price'])/2
 
         if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
             # print("%s: %s" % (str(date), str(stock)))
@@ -774,9 +797,13 @@ class DayTrade():
         Qdo detectar um dt, montar uma classe que calcule separadamente e que crie uma ordem
         virtual qdo houver sobra (positiva ou negativa) do dt.
         """
-        # print(balance_stock_dayts)
-        # print( stock_dayt['qt_dayt'] )
-        # import pdb; pdb.set_trace()
+
+        print( "balance_stock_dayts: %s" % (str(balance_stock_dayts)))
+        print( "Qt Left: %i" % (stock_dayt['qt_dayt']) )
+        print()
+
+
+
 
     def dayt_consolidate_by_stock(self, stock_dayt):
         """ Check daytrade by day, by stock """
@@ -790,7 +817,7 @@ class DayTrade():
 
         self.dayt_close_daytrade(stock_dayt)
 
-            # print(operation)
+        # print(operation)
         # print(stock_dayt['qt_total_bought_dayt'])
         # print(stock_dayt['qt_total_sold_dayt'])
         # print(stock_dayt['qt_dayt'])
@@ -799,14 +826,13 @@ class DayTrade():
 
     def dayt_consolidate(self):
         for day in self._has_dayts.keys():
-            print(day)
             for stock in self._has_dayts[day]:
                 stock_dayt = self._has_dayts[day][stock]
-
+                print('---')
+                print(day)
                 print(stock)
                 self.dayt_consolidate_by_stock(stock_dayt)
 
-            print
         if self._has_dayts.keys():
             return True
 
@@ -824,7 +850,7 @@ class Months():
                 'month_gain':0, 'month_loss':0, 'month_net_gain':0, 'month_net_loss':0,
                 'cumulate_gain':0, 'cumulate_loss':0, 'prev_month_cumulate_loss':0,
                 'b3_taxes':0, 'broker_taxes':0, 'irpf_withholding':0, 'sum_taxes':0,
-                'tax':{}, 'operations':defaultdict(list), 'dayt': DayTrade(self.mkt_type)})
+                'tax':{}, 'operations':defaultdict(list)})#, 'dayt': DayTrade(self.mkt_type)})
 
     def __iter__(self):
         return iter(self._months)
@@ -846,9 +872,9 @@ class Months():
 
         #  Start check Day Trade
         #dayt_dict = month_dict['dayt'].__getitem__(line['dt'], line['stock'])
-        dayt_dict = month_dict['dayt'][line.dt]
+        # dayt_dict = month_dict['dayt'][line.dt]
         # import pdb; pdb.set_trace()
-        month_dict['dayt'].dayt_populate(stock_updated_instance)
+        # month_dict['dayt'].dayt_populate(stock_updated_instance)
         #  End check Day Trade
 
         if (line.buy_sell == 'C'):
@@ -916,7 +942,7 @@ class Months():
             # if self._months[month]['month_sell'] > 20000:
             # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
 
-            has_dayts = self._months[month]['dayt'].dayt_consolidate()
+            # has_dayts = self._months[month]['dayt'].dayt_consolidate()
 
             #print(self._months[month]['dayt']._has_dayts.keys())
             # keys = list(self.mm[202003]['dayt']._has_dayts.keys())
