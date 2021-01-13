@@ -344,19 +344,28 @@ class ObjectifyData():
 
     def reconcile_day(self):
         """ Check if previous day has day trade """
+        stocks = list(self.dayt._has_dayts[self.previous_day].keys())
         for stock in self.dayt._has_dayts[self.previous_day].keys():
             """ If stock has daytrade """
             if 'operations' in self.dayt[self.previous_day][stock]:
                 """ remove from month regular trades """
                 self.days[self.previous_day].pop(stock)
 
-                """ !!! Aqui, consolidando e printando daytrade """
-                self.dayt.dayt_consolidate()
+        """ Daytrade reconciliation """
+        self.dayt.dayt_consolidate_day()
+
+        """
+        Insert virtual orders remaining from daytrade.
+        Why virtual orders? Because sometimes bought and sold orders on daytrade,
+        doesnt match exact, and the rest return to the position wallet.
+        """
+        for stock in self.dayt._has_dayts[self.previous_day].keys():
+            self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought']
+            self.days[self.previous_day][stock] += self.dayt[self.previous_day][stock]['operations']['sold']
 
         # Cleanup daytrade objects
         del self.dayt[self.previous_day]
         del self.dayt._has_dayts[self.previous_day]
-
 
         """ Objectify stocks and add operations to month """
         for stock in self.days[self.previous_day]:
@@ -387,6 +396,10 @@ class ObjectifyData():
 
         """ Day has changed. Reconcile day. """
         if self.previous_day is not None and date != self.previous_day:
+            # print( '++++')
+            # print(date)
+            # print(stock)
+            # print()
             self.days[self.previous_day][stock].reverse()
             self.reconcile_day()
 
@@ -702,10 +715,11 @@ class DayTrade():
 
     def __getitem__(self, date):
         return self._dayts.setdefault(date, defaultdict(lambda: {
-                                        'operations':[],
+                                        'operations':{'bought':[], 'sold':[]},
                                         'qt_total_sold_dayt': 0, 'qt_total_bought_dayt': 0,
                                         'total_amount_sold_dayt': Decimal(), 'total_amount_bought_dayt': Decimal(),
-                                        'has_bought': False, 'has_sold': False,
+                                        'has_bought': False, 'has_sold': False, 'reconciled_dayt_operations':[],
+                                        'operation_result':Decimal(),
                                         'avg_price_bought':Decimal(), 'avg_price_sold':Decimal()}))
 
 
@@ -726,113 +740,99 @@ class DayTrade():
         stock = line['stock']
         buy_sell = line['buy_sell']
         dayt_dict = self._dayts[date]
-        dayt_dict[stock]['operations'].append(line)
 
         if buy_sell == 'C':
             dayt_dict[stock]['has_bought'] = True
-            dayt_dict[stock]['qt_total_bought_dayt'] += line['qt']
-            dayt_dict[stock]['total_amount_bought_dayt'] += line['value']
-            if not dayt_dict[stock]['avg_price_bought']:
-                dayt_dict[stock]['avg_price_bought'] = line['unit_price']
-            else:
-                dayt_dict[stock]['avg_price_bought'] = (dayt_dict[stock]['avg_price_bought'] + line['unit_price'])/2
-
+            dayt_dict[stock]['operations']['bought'].append(line)
         elif buy_sell == 'V':
             dayt_dict[stock]['has_sold'] = True
-            dayt_dict[stock]['qt_total_sold_dayt'] += line['qt']
-            dayt_dict[stock]['total_amount_sold_dayt'] += line['value']
-            if not dayt_dict[stock]['avg_price_sold']:
-                dayt_dict[stock]['avg_price_sold'] = line['unit_price']
-            else:
-                dayt_dict[stock]['avg_price_sold'] = (dayt_dict[stock]['avg_price_sold'] + line['unit_price'])/2
+            dayt_dict[stock]['operations']['sold'].append(line)
 
         if dayt_dict[stock]['has_bought'] and dayt_dict[stock]['has_sold']:
             # print("%s: %s" % (str(date), str(stock)))
             self._has_dayts[date][stock] = dayt_dict[stock]
 
 
-    """
-    Functions bellow to consolidate daytrades checking account.
-    """
-    def dayt_close_daytrade(self, stock_dayt):
+    def match_daytrade_operations(self,stock_dayt, bought, sold):
         """
-        Will be a bug here. Need to pre-process, because here, daytrade is only checked
-        after calculate avg price on StockCheckingAccount.
-        When the system realizes that an operation is a daytrade, it is too late for
-        avg price.
-        """
-        balance_stock_dayts = 0
-        if stock_dayt['qt_dayt'] == 0:
-            # Daytrade operation only
-            balance_stock_dayts = stock_dayt['total_amount_sold_dayt'] - stock_dayt['total_amount_bought_dayt']
-        elif stock_dayt['qt_dayt'] > 0:
-            # Daytrade operation plus long position. Bought stocks into the wallet.
-            # To calculate this, it needs to buy stocks up to the total amount sold.
-            # The rest goes to the long position, outside daytrade realm.
-            # Remove all sold position for this day, this stocks
-            # Remove bought position up to the sold operations
-            amount_bought = stock_dayt['avg_price_bought'] * stock_dayt['qt_total_sold_dayt']
-            balance_stock_dayts = stock_dayt['total_amount_sold_dayt'] - amount_bought
-        elif stock_dayt['qt_dayt'] < 0:
-            # Daytrade operation plus selling position.
-            # To calculate this, it needs to sell stocks up to the total amount bought.
-            # The rest goes to the selling position, outside daytrade realm.
-            # Sell only the ammount bought.
-            # Remove all bought position for this day, this stocks
-            # Remove sold position up to the bought operations
-            amount_sold = stock_dayt['avg_price_sold'] * stock_dayt['qt_total_bought_dayt']
-            balance_stock_dayts = amount_sold - stock_dayt['total_amount_bought_dayt']
-
-
-        """
-        AQUI
-        !!! day_t - Retomar daqui
-        !!!
-
-        !!! Remover a sobra do dia em StockCheckingAccount
-        sobra: stock_dayt['qt_dayt']
-
-        !!! Refazer o calculo de dt.
-        Ao inves de partir do mes, partir do ObjectifyData para nao dar o bug de preprocessamento.
-        Qdo detectar um dt, montar uma classe que calcule separadamente e que crie uma ordem
-        virtual qdo houver sobra (positiva ou negativa) do dt.
+        Match daytrade operations and calculate results
+        Reconcile to match orders quantity, until ends bought or sold orders.
+        If rests orders, they goes to the position wallet.
         """
 
-        print( "balance_stock_dayts: %s" % (str(balance_stock_dayts)))
-        print( "Qt Left: %i" % (stock_dayt['qt_dayt']) )
-        print()
+        if bought['qt'] > sold['qt']:
+            remaining_order  = copy.deepcopy(bought)
+            remaining_order ['qt'] = bought['qt'] - sold['qt']
+            remaining_order ['value'] = remaining_order ['unit_price'] * remaining_order ['qt']
+            # Append remaining order to the refered list.
+            self.bought_operations.append(remaining_order )
+
+            reconciled_order = copy.deepcopy(bought)
+            reconciled_order['qt'] = sold['qt']
+            reconciled_order['value'] = reconciled_order['unit_price'] * reconciled_order['qt']
+            stock_dayt['reconciled_dayt_operations'].append(reconciled_order,)
+            stock_dayt['reconciled_dayt_operations'].append(sold)
+            stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+        elif sold['qt'] > bought['qt']:
+            remaining_order  = copy.deepcopy(sold)
+            remaining_order ['qt'] = sold['qt'] - bought['qt']
+            remaining_order ['value'] = remaining_order ['unit_price'] * remaining_order ['qt']
+            # Append remaining order to the refered list.
+            self.sold_operations.append(remaining_order )
+
+            reconciled_order = copy.deepcopy(sold)
+            reconciled_order['qt'] = bought['qt']
+            reconciled_order['value'] = reconciled_order['unit_price'] * reconciled_order['qt']
+            stock_dayt['reconciled_dayt_operations'].append(reconciled_order)
+            stock_dayt['reconciled_dayt_operations'].append(bought)
+            stock_dayt['operation_result'] += (sold['unit_price'] * bought['qt']) - (bought['unit_price'] * bought['qt'])
+        else:
+            stock_dayt['reconciled_dayt_operations'].append(bought)
+            stock_dayt['reconciled_dayt_operations'].append(sold)
+            stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
 
 
-
-
-    def dayt_consolidate_by_stock(self, stock_dayt):
+    def dayt_consolidate_by_stock(self, stock_dayt, stock):
         """ Check daytrade by day, by stock """
-        # for stock, values in self._months[month]['operations'].items():
-        qt_total_bought_dayt = stock_dayt['qt_total_bought_dayt']
-        qt_total_sold_dayt = stock_dayt['qt_total_sold_dayt']
+        self.bought_operations = stock_dayt['operations']['bought']
+        self.sold_operations = stock_dayt['operations']['sold']
+        self.bought_operations.reverse()
+        self.sold_operations.reverse()
 
-        # Store amount of stocks daytraded
-        # If positive, more buy else if negative, more sell.
-        stock_dayt['qt_dayt'] = qt_total_bought_dayt - qt_total_sold_dayt
-
-        self.dayt_close_daytrade(stock_dayt)
-
-        # print(operation)
-        # print(stock_dayt['qt_total_bought_dayt'])
-        # print(stock_dayt['qt_total_sold_dayt'])
-        # print(stock_dayt['qt_dayt'])
+        while self.bought_operations:
+            if self.sold_operations:
+                bought = self.bought_operations.pop()
+                sold = self.sold_operations.pop()
+                self.match_daytrade_operations(stock_dayt, bought, sold)
+            else:
+                break
 
 
+        """
+        After match_daytrade_operations check if remaining bought or sold position
+        and send back to store in the wallet.
+        This operations needs to return to wallet: stock_dayt['operations']
+        """
 
-    def dayt_consolidate(self):
+        print("stock_dayt['operations']")
+        print(stock_dayt['operations'])
+
+        print('operation result')
+        print(stock_dayt['operation_result'] )
+        #
+        # import pdb; pdb.set_trace()
+
+
+
+    def dayt_consolidate_day(self):
         for day in self._has_dayts.keys():
             for stock in self._has_dayts[day]:
                 stock_dayt = self._has_dayts[day][stock]
                 print('---')
                 print(day)
                 print(stock)
-                self.dayt_consolidate_by_stock(stock_dayt)
-
+                # import pdb; pdb.set_trace()
+                self.dayt_consolidate_by_stock(stock_dayt, stock)
         if self._has_dayts.keys():
             return True
 
