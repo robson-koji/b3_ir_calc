@@ -166,11 +166,11 @@ class ObjectifyData():
                                 continue
 
 
-                        # if not 'IRBR3' in line['stock']:
+                        # if not 'ENBR3' in line['stock']:
                         #      continue
-                        # import pdb; pdb.set_trace()
-
-                        # if line['year_month_id'] != 202003:
+                        # # import pdb; pdb.set_trace()
+                        #
+                        # if line['year_month_id'] != 202004:
                         #     continue
 
                         # Whenever the months change (for each new month),
@@ -330,13 +330,7 @@ class ObjectifyData():
         stock.calculate_broker_taxes(self.broker_taxes, **line)
         stock.calculate_irpf_withholding(**line)
 
-        # deep copy operation values
-        # cp_stock = copy.deepcopy(stock.__dict__)
         cp_stock = copy.deepcopy(stock)
-
-        # import pdb; pdb.set_trace()
-
-        #if cp_stock['qt_total']:
         self.stocks_wallet[cp_stock.stock] = cp_stock
 
         return cp_stock
@@ -345,7 +339,10 @@ class ObjectifyData():
     def reconcile_day(self):
         """ Check if previous day has day trade """
         stocks = list(self.dayt._has_dayts[self.previous_day].keys())
+        month = None
         for stock in self.dayt._has_dayts[self.previous_day].keys():
+            # import pdb; pdb.set_trace()
+            month = self.dayt[self.previous_day][stock]['operations']['sold'][0]['year_month_id']
             """ If stock has daytrade """
             if 'operations' in self.dayt[self.previous_day][stock]:
                 """ remove from month regular trades """
@@ -363,10 +360,6 @@ class ObjectifyData():
             self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought']
             self.days[self.previous_day][stock] += self.dayt[self.previous_day][stock]['operations']['sold']
 
-        # Cleanup daytrade objects
-        del self.dayt[self.previous_day]
-        del self.dayt._has_dayts[self.previous_day]
-
         """ Objectify stocks and add operations to month """
         for stock in self.days[self.previous_day]:
             for line in self.days[self.previous_day][stock]:
@@ -376,6 +369,12 @@ class ObjectifyData():
 
                 """ Call month object and add regular trades """
                 self.objectify_months( stock_updated_instance )
+
+        if month: self.month_add_dayt(month, self.previous_day, self.dayt._has_dayts)
+
+        # Cleanup daytrade objects
+        del self.dayt[self.previous_day]
+        del self.dayt._has_dayts[self.previous_day]
 
 
     def verify_intraday(self, line):
@@ -406,7 +405,6 @@ class ObjectifyData():
         self.previous_day = date
 
 
-
     def objectify_months(self, stock_updated_instance):
         month = stock_updated_instance.year_month_id
         # Initialize month object
@@ -414,6 +412,9 @@ class ObjectifyData():
         # Set operation attributes
         self.mm.month_populate(month, stock_updated_instance)
 
+
+    def month_add_dayt(self, month, day_of_dayt, stock_dayt):
+        self.mm[month]['dayt'][day_of_dayt] = stock_dayt[day_of_dayt]
 
 
 class RunningOptions():
@@ -716,11 +717,14 @@ class DayTrade():
     def __getitem__(self, date):
         return self._dayts.setdefault(date, defaultdict(lambda: {
                                         'operations':{'bought':[], 'sold':[]},
-                                        'qt_total_sold_dayt': 0, 'qt_total_bought_dayt': 0,
+                                        'has_bought': False, 'has_sold': False,
+                                        'qt_total_dayt': 0,
                                         'total_amount_sold_dayt': Decimal(), 'total_amount_bought_dayt': Decimal(),
-                                        'has_bought': False, 'has_sold': False, 'reconciled_dayt_operations':[],
                                         'operation_result':Decimal(),
-                                        'avg_price_bought':Decimal(), 'avg_price_sold':Decimal()}))
+                                        'qt_initial_operations':0, 'qt_remaining_operations': 0,
+                                        'qt_real_dt_operations':0,
+                                        'reconciled_bought_operations': [],'reconciled_sold_operations': [],
+                                        'avg_price_bought':Decimal(), 'avg_price_sold':Decimal() }))
 
 
     def __delitem__(self, key):
@@ -758,22 +762,37 @@ class DayTrade():
         Match daytrade operations and calculate results
         Reconcile to match orders quantity, until ends bought or sold orders.
         If rests orders, they goes to the position wallet.
+
+        stock_dayt['qt_real_dt_operations'] may be different of
+            len(stock_dayt['reconciled_bought_operations']) +
+                len(stock_dayt['reconciled_sol_operations'])
+        because reconciliation process may split operations to match buy and sell,
+        and may rest one part of the operation that returns to the wallet.
         """
 
         if bought['qt'] > sold['qt']:
+            """ Buy up to sold position """
             remaining_order  = copy.deepcopy(bought)
             remaining_order ['qt'] = bought['qt'] - sold['qt']
             remaining_order ['value'] = remaining_order ['unit_price'] * remaining_order ['qt']
             # Append remaining order to the refered list.
             self.bought_operations.append(remaining_order )
 
+
             reconciled_order = copy.deepcopy(bought)
             reconciled_order['qt'] = sold['qt']
             reconciled_order['value'] = reconciled_order['unit_price'] * reconciled_order['qt']
-            stock_dayt['reconciled_dayt_operations'].append(reconciled_order,)
-            stock_dayt['reconciled_dayt_operations'].append(sold)
+            stock_dayt['reconciled_bought_operations'].append(reconciled_order)
+            stock_dayt['reconciled_sold_operations'].append(sold)
+
             stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+            stock_dayt['qt_total_dayt'] += sold['qt'] * 2
+            stock_dayt['total_amount_bought_dayt'] += (bought['unit_price'] * sold['qt'])
+            stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * sold  ['qt'])
+
+
         elif sold['qt'] > bought['qt']:
+            """ Sell up to bought position """
             remaining_order  = copy.deepcopy(sold)
             remaining_order ['qt'] = sold['qt'] - bought['qt']
             remaining_order ['value'] = remaining_order ['unit_price'] * remaining_order ['qt']
@@ -783,21 +802,31 @@ class DayTrade():
             reconciled_order = copy.deepcopy(sold)
             reconciled_order['qt'] = bought['qt']
             reconciled_order['value'] = reconciled_order['unit_price'] * reconciled_order['qt']
-            stock_dayt['reconciled_dayt_operations'].append(reconciled_order)
-            stock_dayt['reconciled_dayt_operations'].append(bought)
+            stock_dayt['reconciled_sold_operations'].append(reconciled_order)
+            stock_dayt['reconciled_bought_operations'].append(bought)
+
             stock_dayt['operation_result'] += (sold['unit_price'] * bought['qt']) - (bought['unit_price'] * bought['qt'])
+            stock_dayt['qt_total_dayt'] += bought['qt'] * 2
+            stock_dayt['total_amount_bought_dayt'] += (bought['unit_price'] * bought['qt'])
+            stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * bought['qt'])
         else:
-            stock_dayt['reconciled_dayt_operations'].append(bought)
-            stock_dayt['reconciled_dayt_operations'].append(sold)
+            stock_dayt['reconciled_bought_operations'].append(bought)
+            stock_dayt['reconciled_sold_operations'].append(sold)
             stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+            stock_dayt['qt_total_dayt'] += sold['qt'] * 2
+            stock_dayt['total_amount_bought_dayt'] +=  (bought['unit_price'] * bought['qt'])
+            stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * sold['qt'])
 
 
-    def dayt_consolidate_by_stock(self, stock_dayt, stock):
+    def dayt_consolidate_by_stock(self, stock_dayt):
         """ Check daytrade by day, by stock """
         self.bought_operations = stock_dayt['operations']['bought']
         self.sold_operations = stock_dayt['operations']['sold']
         self.bought_operations.reverse()
         self.sold_operations.reverse()
+
+        # Store the real qt daytrading operations
+        stock_dayt['qt_initial_operations'] = len(self.bought_operations) + len(self.sold_operations)
 
         while self.bought_operations:
             if self.sold_operations:
@@ -807,21 +836,22 @@ class DayTrade():
             else:
                 break
 
+        # After loop all operations, lenght may change.
+        # These stocks go back to position wallet.
+        stock_dayt['qt_remaining_operations'] = len(self.bought_operations) + len(self.sold_operations)
 
-        """
-        After match_daytrade_operations check if remaining bought or sold position
-        and send back to store in the wallet.
-        This operations needs to return to wallet: stock_dayt['operations']
-        """
+        # These is just for statistics.
+        stock_dayt['qt_real_dt_operations'] = stock_dayt['qt_initial_operations'] -\
+                                                stock_dayt['qt_remaining_operations']
 
-        print("stock_dayt['operations']")
-        print(stock_dayt['operations'])
 
-        print('operation result')
-        print(stock_dayt['operation_result'] )
+        # print("stock_dayt['operations']")
+        # print(stock_dayt['operations'])
         #
-        # import pdb; pdb.set_trace()
+        # print('operation result')
+        # print(stock_dayt['operation_result'] )
 
+        return stock_dayt
 
 
     def dayt_consolidate_day(self):
@@ -831,10 +861,7 @@ class DayTrade():
                 print('---')
                 print(day)
                 print(stock)
-                # import pdb; pdb.set_trace()
-                self.dayt_consolidate_by_stock(stock_dayt, stock)
-        if self._has_dayts.keys():
-            return True
+                self.dayt_consolidate_by_stock(stock_dayt)
 
 
 
@@ -850,7 +877,7 @@ class Months():
                 'month_gain':0, 'month_loss':0, 'month_net_gain':0, 'month_net_loss':0,
                 'cumulate_gain':0, 'cumulate_loss':0, 'prev_month_cumulate_loss':0,
                 'b3_taxes':0, 'broker_taxes':0, 'irpf_withholding':0, 'sum_taxes':0,
-                'tax':{}, 'operations':defaultdict(list)})#, 'dayt': DayTrade(self.mkt_type)})
+                'tax':{}, 'operations':defaultdict(list), 'dayt': defaultdict(dict)})
 
     def __iter__(self):
         return iter(self._months)
@@ -870,13 +897,6 @@ class Months():
         month_dict = self._months[month]
         month_dict['dt'] = line.dt
 
-        #  Start check Day Trade
-        #dayt_dict = month_dict['dayt'].__getitem__(line['dt'], line['stock'])
-        # dayt_dict = month_dict['dayt'][line.dt]
-        # import pdb; pdb.set_trace()
-        # month_dict['dayt'].dayt_populate(stock_updated_instance)
-        #  End check Day Trade
-
         if (line.buy_sell == 'C'):
             month_dict['month_buy'] += line.value
         elif (line.buy_sell == 'V'):
@@ -894,21 +914,21 @@ class Months():
         except:
             raise
 
-    def cumulate_loss(self, this_month):
+    def cumulate_loss(self, obj, this_month):
         previous_month = self.subtract_one_month(this_month)
-        self._months[this_month]['cumulate_loss'] = self._months[this_month]['month_net_loss']
+        obj[this_month]['cumulate_loss'] = obj[this_month]['month_net_loss']
         if previous_month:
-            self._months[this_month]['cumulate_loss'] += self._months[previous_month]['cumulate_loss']
-            self._months[this_month]['prev_month_cumulate_loss'] = self._months[previous_month]['cumulate_loss']
+            obj[this_month]['cumulate_loss'] += obj[previous_month]['cumulate_loss']
+            obj[this_month]['prev_month_cumulate_loss'] = obj[previous_month]['cumulate_loss']
 
 
-    def cumulate_gain(self, this_month):
+    def cumulate_gain(self, obj, this_month):
         previous_month = self.subtract_one_month(this_month)
-        self._months[this_month]['cumulate_gain'] = self._months[this_month]['month_net_gain']
+        obj[this_month]['cumulate_gain'] = obj[this_month]['month_net_gain']
         if previous_month:
-            self._months[this_month]['cumulate_gain'] += self._months[previous_month]['cumulate_loss']
+            obj[this_month]['cumulate_gain'] += obj[previous_month]['cumulate_loss']
 
-        if self._months[this_month]['cumulate_gain'] < 0 : self._months[this_month]['cumulate_gain'] = 0
+        if obj[this_month]['cumulate_gain'] < 0 : obj[this_month]['cumulate_gain'] = 0
 
 
 
@@ -925,6 +945,71 @@ class Months():
         return {'final_balance':final_balance, 'tax_amount': final_balance * Decimal(0.15)}
 
 
+    def summarize_regular_operations(self,month):
+        balance_current_month = 0
+        for stock, values in self._months[month]['operations'].items():
+            for operation in values:
+                if operation.buy_sell == 'V':
+                    self._months[month]['qt_sell'] += 1
+                    if operation.profit:
+                        balance_current_month += operation.profit
+                    elif operation.loss:
+                        balance_current_month -= operation.loss
+                else:
+                    self._months[month]['qt_buy'] += 1
+                self._months[month]['b3_taxes'] += operation.b3_taxes
+                self._months[month]['broker_taxes'] += operation.broker_taxes
+                self._months[month]['irpf_withholding'] += operation.irpf_withholding
+        self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
+        self._months[month]['broker_taxes'] = round(Decimal(self._months[month]['broker_taxes']), 2)
+        self._months[month]['irpf_withholding'] = round(Decimal(self._months[month]['irpf_withholding']), 2)
+        self._months[month]['sum_taxes'] = self._months[month]['b3_taxes'] +\
+                                                self._months[month]['broker_taxes'] +\
+                                                        self._months[month]['irpf_withholding']
+
+        balance_net_current_month = balance_current_month - self._months[month]['sum_taxes']
+
+        if balance_current_month < 0:
+            self._months[month]['month_loss'] =  balance_current_month
+        elif balance_current_month > 0:
+            self._months[month]['month_gain'] =  balance_current_month
+
+        if balance_net_current_month < 0:
+            self._months[month]['month_net_loss'] = balance_net_current_month
+        elif balance_net_current_month > 0:
+            self._months[month]['month_net_gain'] = balance_net_current_month
+
+        self.cumulate_loss(self._months, month)
+        self.cumulate_gain(self._months, month)
+
+        # if self.threshold_exempt(month):
+        if balance_net_current_month > 0:
+            final_balance = balance_net_current_month + self._months[month]['cumulate_loss']
+            if final_balance > 0:
+                self._months[month]['cumulate_loss'] = 0
+                self._months[month]['cumulate_gain'] = final_balance
+                self._months[month]['tax'] = self.tax_calc(Decimal(final_balance))
+            elif final_balance <= 0:
+                self._months[month]['cumulate_gain'] = 0
+                self._months[month]['cumulate_loss'] = final_balance
+
+        # print(balance_current_month)
+        # print(self._months[month]['month_gain'])
+        # print(self._months[month]['month_loss'])
+        # print(self._months[month]['cumulate_loss'])
+        # print(self._months[month]['tax'])
+
+
+    def summarize_daytrading_operations(self,month):
+        print('\n\n')
+        print('summarze_daytrading_operations')
+        for day, values in self._months[month]['dayt'].items():
+            print(day)
+            for stock in values:
+                print(stock)
+
+
+            # import pdb; pdb.set_trace()
 
 
     def month_add_detail(self):
@@ -938,69 +1023,13 @@ class Months():
             # print(month)
             # import pdb; pdb.set_trace()
 
-            balance_current_month = 0
             # if self._months[month]['month_sell'] > 20000:
             # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
 
-            # has_dayts = self._months[month]['dayt'].dayt_consolidate()
+            self.summarize_regular_operations(month)
+            self.summarize_daytrading_operations(month)
 
-            #print(self._months[month]['dayt']._has_dayts.keys())
-            # keys = list(self.mm[202003]['dayt']._has_dayts.keys())
 
-            # if has_dayts:
-            #     import pdb; pdb.set_trace()
-
-            for stock, values in self._months[month]['operations'].items():
-                for operation in values:
-                    if operation.buy_sell == 'V':
-                        self._months[month]['qt_sell'] += 1
-                        if operation.profit:
-                            balance_current_month += operation.profit
-                        elif operation.loss:
-                            balance_current_month -= operation.loss
-                    else:
-                        self._months[month]['qt_buy'] += 1
-                    self._months[month]['b3_taxes'] += operation.b3_taxes
-                    self._months[month]['broker_taxes'] += operation.broker_taxes
-                    self._months[month]['irpf_withholding'] += operation.irpf_withholding
-            self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
-            self._months[month]['broker_taxes'] = round(Decimal(self._months[month]['broker_taxes']), 2)
-            self._months[month]['irpf_withholding'] = round(Decimal(self._months[month]['irpf_withholding']), 2)
-            self._months[month]['sum_taxes'] = self._months[month]['b3_taxes'] +\
-                                                    self._months[month]['broker_taxes'] +\
-                                                            self._months[month]['irpf_withholding']
-
-            balance_net_current_month = balance_current_month - self._months[month]['sum_taxes']
-
-            if balance_current_month < 0:
-                self._months[month]['month_loss'] =  balance_current_month
-            elif balance_current_month > 0:
-                self._months[month]['month_gain'] =  balance_current_month
-
-            if balance_net_current_month < 0:
-                self._months[month]['month_net_loss'] = balance_net_current_month
-            elif balance_net_current_month > 0:
-                self._months[month]['month_net_gain'] = balance_net_current_month
-
-            self.cumulate_loss(month)
-            self.cumulate_gain(month)
-
-            # if self.threshold_exempt(month):
-            if balance_net_current_month > 0:
-                final_balance = balance_net_current_month + self._months[month]['cumulate_loss']
-                if final_balance > 0:
-                    self._months[month]['cumulate_loss'] = 0
-                    self._months[month]['cumulate_gain'] = final_balance
-                    self._months[month]['tax'] = self.tax_calc(Decimal(final_balance))
-                elif final_balance <= 0:
-                    self._months[month]['cumulate_gain'] = 0
-                    self._months[month]['cumulate_loss'] = final_balance
-
-            # print(balance_current_month)
-            # print(self._months[month]['month_gain'])
-            # print(self._months[month]['month_loss'])
-            # print(self._months[month]['cumulate_loss'])
-            # print(self._months[month]['tax'])
 
 
 
