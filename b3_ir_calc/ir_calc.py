@@ -33,13 +33,13 @@ class StockNotFound(Exception):
 
 
 class Taxes():
-    def calculate_b3_taxes(self, b3_taxes_def, date, value):
+    def calculate_b3_taxes(self, b3_taxes_def, type, date, value):
         """
         B3 taxes change along the time.
         self.taxes.calculate_b3_taxes(b3_taxes_def, line['dt'],  line['value'])
         """
         # b3_taxes_def - callback function
-        b3_taxes_factor = b3_taxes_def(date)
+        b3_taxes_factor = b3_taxes_def(type, date)
         #self.b3_taxes = line['value'] * b3_taxes_factor
         return value * b3_taxes_factor
 
@@ -71,7 +71,7 @@ class ObjectifyData():
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
-        self.mm = Months(mkt_type)
+        self.mm = Months(mkt_type, broker_taxes, b3_taxes)
         self.stocks = {}
         self.running_options = RunningOptions()
         self.stocks_wallet = defaultdict()
@@ -358,13 +358,9 @@ class ObjectifyData():
                 self.illegal_operation[line['stock']].append(line)
                 return None
 
-        stock.b3_taxes = self.taxes.calculate_b3_taxes(self.b3_taxes_def, line['dt'],  line['value'])
+        stock.b3_taxes = self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'regular', line['dt'],  line['value'])
         stock.broker_taxes = self.taxes.calculate_broker_taxes(self.broker_taxes_def, line['dt'])
         stock.irpf_withholding = self.taxes.calculate_irpf_withholding('regular', line['value'])
-
-        # stock.calculate_b3_taxes(self.b3_taxes_def, **line)
-        # stock.calculate_broker_taxes(self.broker_taxes_def, **line)
-        # stock.calculate_irpf_withholding(**line)
 
         cp_stock = copy.deepcopy(stock)
         self.stocks_wallet[cp_stock.stock] = cp_stock
@@ -694,17 +690,17 @@ class StockCheckingAccount():
             self.avg_price = 0
 
 
-    def calculate_b3_taxes(self, b3_taxes_def, **line):
-        # b3_taxes_def - callback function
-        b3_taxes_factor = b3_taxes_def(line['dt'])
-        self.b3_taxes = line['value'] * b3_taxes_factor
-
-    def calculate_broker_taxes(self, broker_taxes_def, **line):
-        broker_taxes_fees = broker_taxes_def(line['dt'])
-        self.broker_taxes = broker_taxes_fees.stock_brokering + broker_taxes_fees.stock_iss
-
-    def calculate_irpf_withholding(self, **line):
-        self.irpf_withholding = line['value'] * Decimal(0.00005)
+    # def calculate_b3_taxes(self, b3_taxes_def, type, **line):
+    #     # b3_taxes_def - callback function
+    #     b3_taxes_factor = b3_taxes_def(type, line['dt'])
+    #     self.b3_taxes = line['value'] * b3_taxes_factor
+    #
+    # def calculate_broker_taxes(self, broker_taxes_def, **line):
+    #     broker_taxes_fees = broker_taxes_def(line['dt'])
+    #     self.broker_taxes = broker_taxes_fees.stock_brokering + broker_taxes_fees.stock_iss
+    #
+    # def calculate_irpf_withholding(self, **line):
+    #     self.irpf_withholding = line['value'] * Decimal(0.00005)
 
     def update_event(self, stock_event):
         """
@@ -902,9 +898,12 @@ class DayTrade():
 
 
 class Months():
-    def __init__(self, mkt_type):
+    def __init__(self, mkt_type, broker_taxes=None, b3_taxes=None):
         self._months = {}
         self.mkt_type = mkt_type
+        self.taxes = Taxes()
+        self.broker_taxes_def = broker_taxes
+        self.b3_taxes_def = b3_taxes
 
     def __getitem__(self, month):
         # stocks = {'operations':[], 'totalization':{}}
@@ -951,21 +950,18 @@ class Months():
         except:
             raise
 
-    def cumulate_loss(self, obj, this_month):
-        previous_month = self.subtract_one_month(this_month)
-        obj[this_month]['cumulate_loss'] = obj[this_month]['month_net_loss']
+    def cumulate_loss(self, this_month, previous_month):
+        this_month['cumulate_loss'] = this_month['month_net_loss']
         if previous_month:
-            obj[this_month]['cumulate_loss'] += obj[previous_month]['cumulate_loss']
-            obj[this_month]['prev_month_cumulate_loss'] = obj[previous_month]['cumulate_loss']
+            this_month['cumulate_loss'] += previous_month['cumulate_loss']
+            this_month['prev_month_cumulate_loss'] = previous_month['cumulate_loss']
 
 
-    def cumulate_gain(self, obj, this_month):
-        previous_month = self.subtract_one_month(this_month)
-        obj[this_month]['cumulate_gain'] = obj[this_month]['month_net_gain']
+    def cumulate_gain(self, this_month, previous_month):
+        this_month['cumulate_gain'] = this_month['month_net_gain']
         if previous_month:
-            obj[this_month]['cumulate_gain'] += obj[previous_month]['cumulate_loss']
-
-        if obj[this_month]['cumulate_gain'] < 0 : obj[this_month]['cumulate_gain'] = 0
+            this_month['cumulate_gain'] += previous_month['cumulate_loss']
+        if this_month['cumulate_gain'] < 0 : this_month['cumulate_gain'] = 0
 
 
     def threshold_exempt(self, this_month):
@@ -982,88 +978,106 @@ class Months():
         return {'final_balance':final_balance, 'tax_amount': final_balance * Decimal(0.15)}
 
 
-    def finance_result(self, obj, month, balance_current_month, sum_taxes=0 ):
+    def finance_result(self, this_month, previous_month, balance_current_month, sum_taxes=0 ):
         balance_net_current_month = balance_current_month - sum_taxes
 
         if balance_current_month < 0:
-            obj['month_loss'] =  balance_current_month
+            this_month['month_loss'] =  balance_current_month
         elif balance_current_month > 0:
-            obj['month_gain'] =  balance_current_month
+            this_month['month_gain'] =  balance_current_month
 
         if balance_net_current_month < 0:
-            obj['month_net_loss'] = balance_net_current_month
+            this_month['month_net_loss'] = balance_net_current_month
         elif balance_net_current_month > 0:
-            obj['month_net_gain'] = balance_net_current_month
+            this_month['month_net_gain'] = balance_net_current_month
 
-        self.cumulate_loss(self._months, month)
-        self.cumulate_gain(self._months, month)
+        self.cumulate_loss(this_month, previous_month)
+        self.cumulate_gain(this_month, previous_month)
 
         # if self.threshold_exempt(month):
         if balance_net_current_month > 0:
-            final_balance = balance_net_current_month + obj['cumulate_loss']
+            final_balance = balance_net_current_month + this_month['cumulate_loss']
             if final_balance > 0:
-                obj['cumulate_loss'] = 0
-                obj['cumulate_gain'] = final_balance
-                obj['tax'] = self.tax_calc(Decimal(final_balance))
+                this_month['cumulate_loss'] = 0
+                this_month['cumulate_gain'] = final_balance
+                this_month['tax'] = self.tax_calc(Decimal(final_balance))
             elif final_balance <= 0:
-                obj['cumulate_gain'] = 0
-                obj['cumulate_loss'] = final_balance
+                this_month['cumulate_gain'] = 0
+                this_month['cumulate_loss'] = final_balance
 
         # print(balance_current_month)
-        # print(obj['month_gain'])
-        # print(obj['month_loss'])
-        # print(obj['cumulate_loss'])
-        # print(obj['tax'])
+        # print(this_month['month_gain'])
+        # print(this_month['month_loss'])
+        # print(this_month['cumulate_loss'])
+        # print(this_month['tax'])
 
 
-    def summarize_regular_operations(self,month):
+    def summarize_regular_operations(self):
         balance_current_month = 0
-        for stock, values in self._months[month]['operations'].items():
+        for stock, values in self.this_month_obj ['operations'].items():
             for operation in values:
                 if operation.buy_sell == 'V':
-                    self._months[month]['qt_sell'] += 1
+                    self.this_month_obj ['qt_sell'] += 1
                     if operation.profit:
                         balance_current_month += operation.profit
                     elif operation.loss:
                         balance_current_month -= operation.loss
                 else:
-                    self._months[month]['qt_buy'] += 1
-                self._months[month]['b3_taxes'] += operation.b3_taxes
-                self._months[month]['broker_taxes'] += operation.broker_taxes
-                self._months[month]['irpf_withholding'] += operation.irpf_withholding
-        self._months[month]['b3_taxes'] = round(Decimal(self._months[month]['b3_taxes']), 2)
-        self._months[month]['broker_taxes'] = round(Decimal(self._months[month]['broker_taxes']), 2)
-        self._months[month]['irpf_withholding'] = round(Decimal(self._months[month]['irpf_withholding']), 2)
-        self._months[month]['sum_taxes'] = self._months[month]['b3_taxes'] +\
-                                                self._months[month]['broker_taxes'] +\
-                                                        self._months[month]['irpf_withholding']
+                    self.this_month_obj ['qt_buy'] += 1
+                self.this_month_obj ['b3_taxes'] += operation.b3_taxes
+                self.this_month_obj ['broker_taxes'] += operation.broker_taxes
+                self.this_month_obj ['irpf_withholding'] += operation.irpf_withholding
+        self.this_month_obj ['b3_taxes'] = round(Decimal(self.this_month_obj ['b3_taxes']), 2)
+        self.this_month_obj ['broker_taxes'] = round(Decimal(self.this_month_obj ['broker_taxes']), 2)
+        self.this_month_obj ['irpf_withholding'] = round(Decimal(self.this_month_obj ['irpf_withholding']), 2)
+        self.this_month_obj ['sum_taxes'] = self.this_month_obj ['b3_taxes'] +\
+                                                self.this_month_obj ['broker_taxes'] +\
+                                                        self.this_month_obj ['irpf_withholding']
 
-        self.finance_result(self._months[month], month, balance_current_month, self._months[month]['sum_taxes'] )
+        self.finance_result(self.this_month_obj, self.previous_month_obj, balance_current_month, self.this_month_obj ['sum_taxes'] )
 
 
 
-    def summarize_daytrading_operations(self,month):
+    def summarize_daytrading_operations(self):
         print('\n\n')
         print('summarze_daytrading_operations')
-        for day, values in self._months[month]['dayt'].items():
+        for day, values in self.this_month_obj ['dayt'].items():
             print(day)
             for stock in values:
                 print(stock)
                 # print(values[stock])
-                self._months[month]['dayt_summary']['total_amount_bought_dayt'] += values[stock]['total_amount_bought_dayt']
-                self._months[month]['dayt_summary']['total_amount_sold_dayt'] += values[stock]['total_amount_sold_dayt']
+                self.this_month_obj ['dayt_summary']['total_amount_bought_dayt'] += values[stock]['total_amount_bought_dayt']
+                self.this_month_obj ['dayt_summary']['total_amount_sold_dayt'] += values[stock]['total_amount_sold_dayt']
+
+                # import pdb; pdb.set_trace()
+                # # For each stock, calc taxes
+                dayt_sum_value_operations =  values[stock]['total_amount_bought_dayt'] + \
+                                                    values[stock]['total_amount_sold_dayt']
+                self.this_month_obj ['dayt_summary']['b3_taxes'] += self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'daytrade', day, dayt_sum_value_operations)
+                self.this_month_obj ['dayt_summary']['broker_taxes'] += self.taxes.calculate_broker_taxes(self.broker_taxes_def, day)
+                if values[stock]['operation_result'] > 0:
+                    self.this_month_obj ['dayt_summary']['irpf_withholding'] += self.taxes.calculate_irpf_withholding('daytrade', values[stock]['operation_result'])
+                    # print(values[stock])
+                    # print(self.this_month_obj ['dayt_summary'])
+
+        balance_current_month = self.this_month_obj ['dayt_summary']['total_amount_sold_dayt'] -\
+                                    self.this_month_obj ['dayt_summary']['total_amount_bought_dayt']
+
+        self.this_month_obj ['dayt_summary']['sum_taxes'] = self.this_month_obj ['dayt_summary']['b3_taxes'] +\
+                                                self.this_month_obj ['dayt_summary']['broker_taxes'] +\
+                                                        self.this_month_obj ['dayt_summary']['irpf_withholding']
+
+        if self.previous_month_obj:
+            self.finance_result(self.this_month_obj ['dayt_summary'], self.previous_month_obj ['dayt_summary'], balance_current_month, self.this_month_obj ['dayt_summary']['sum_taxes']  )
+        else:
+            self.finance_result(self.this_month_obj ['dayt_summary'], None, balance_current_month, self.this_month_obj ['dayt_summary']['sum_taxes']  )
 
 
-        balance_current_month = self._months[month]['dayt_summary']['total_amount_sold_dayt'] -\
-                                    self._months[month]['dayt_summary']['total_amount_bought_dayt']
+        print(self.this_month_obj ['dayt_summary'])
 
 
-        self.finance_result(self._months[month]['dayt_summary'], month, balance_current_month, 0 )
-
-        print(self._months[month]['dayt_summary'])
-
-
-        #import pdb; pdb.set_trace()
+        # Incluir os impostos!!!!
+        # import pdb; pdb.set_trace()
 
 
     def month_add_detail(self):
@@ -1071,17 +1085,27 @@ class Months():
         Add gain, loss for all months.
         Calculate final balance and due tax.
         """
+
         # import pdb; pdb.set_trace()
         for month in self.keys():
+            previous_month = self.subtract_one_month(month)
             # print("\n\n"
             # print(month)
             # import pdb; pdb.set_trace()
 
-            # if self._months[month]['month_sell'] > 20000:
-            # print("%s Total vendas : %s" % (month, self._months[month]['month_sell'])
+            # if self.this_month_obj ['month_sell'] > 20000:
+            # print("%s Total vendas : %s" % (month, self.this_month_obj ['month_sell'])
 
-            self.summarize_regular_operations(month)
-            self.summarize_daytrading_operations(month)
+            self.this_month_obj = self._months[month]
+            if not previous_month in self._months:
+                self.previous_month_obj = None
+            else:
+                self.previous_month_obj = self._months[previous_month]
+
+            # Always have to summarize,
+            # to get former month cumulate loss if exists.
+            self.summarize_regular_operations()
+            self.summarize_daytrading_operations()
 
 
 
