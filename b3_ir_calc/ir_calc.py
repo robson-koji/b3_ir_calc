@@ -387,10 +387,13 @@ class ObjectifyData():
         Insert virtual orders remaining from daytrade.
         Why virtual orders? Because sometimes bought and sold orders on daytrade,
         doesnt match exact, and the rest return to the position wallet.
+
+        !!! This seems to be obsolete!!!
         """
-        for stock in self.dayt._has_dayts[self.previous_day].keys():
-            self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought']
-            self.days[self.previous_day][stock] += self.dayt[self.previous_day][stock]['operations']['sold']
+        # for stock in self.dayt._has_dayts[self.previous_day].keys():
+        #     import pdb; pdb.set_trace()
+        #     self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought']
+        #     self.days[self.previous_day][stock] += self.dayt[self.previous_day][stock]['operations']['sold']
 
         """ Objectify stocks and add operations to month """
         for stock in self.days[self.previous_day]:
@@ -749,6 +752,7 @@ class DayTrade():
     def __getitem__(self, date):
         return self._dayts.setdefault(date, defaultdict(lambda: {
                                         'operations':{'bought':[], 'sold':[]},
+                                        'original_operations':{'bought':[], 'sold':[]},
                                         'has_bought': False, 'has_sold': False,
                                         'qt_total_dayt': 0,
                                         'total_amount_sold_dayt': Decimal(), 'total_amount_bought_dayt': Decimal(),
@@ -800,6 +804,10 @@ class DayTrade():
                 len(stock_dayt['reconciled_sol_operations'])
         because reconciliation process may split operations to match buy and sell,
         and may rest one part of the operation that returns to the wallet.
+
+        stock_dayt['operations'] become remaining operations to loop out thought
+        rest of operations, untill there are no more orders to match, returning the
+        remaining order(s).
         """
 
         if bought['qt'] > sold['qt']:
@@ -817,7 +825,8 @@ class DayTrade():
             stock_dayt['reconciled_bought_operations'].append(reconciled_order)
             stock_dayt['reconciled_sold_operations'].append(sold)
 
-            stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+            sold['result'] = (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+            stock_dayt['operation_result'] += sold['result']
             stock_dayt['qt_total_dayt'] += sold['qt'] * 2
             stock_dayt['total_amount_bought_dayt'] += (bought['unit_price'] * sold['qt'])
             stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * sold  ['qt'])
@@ -837,14 +846,17 @@ class DayTrade():
             stock_dayt['reconciled_sold_operations'].append(reconciled_order)
             stock_dayt['reconciled_bought_operations'].append(bought)
 
-            stock_dayt['operation_result'] += (sold['unit_price'] * bought['qt']) - (bought['unit_price'] * bought['qt'])
+            reconciled_order['result'] = (sold['unit_price'] * bought['qt']) - (bought['unit_price'] * bought['qt'])
+            stock_dayt['operation_result'] += reconciled_order['result']
             stock_dayt['qt_total_dayt'] += bought['qt'] * 2
             stock_dayt['total_amount_bought_dayt'] += (bought['unit_price'] * bought['qt'])
             stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * bought['qt'])
         else:
             stock_dayt['reconciled_bought_operations'].append(bought)
             stock_dayt['reconciled_sold_operations'].append(sold)
-            stock_dayt['operation_result'] += (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+
+            sold['result'] = (sold['unit_price'] * sold['qt']) - (bought['unit_price'] * sold['qt'])
+            stock_dayt['operation_result'] += sold['result']
             stock_dayt['qt_total_dayt'] += sold['qt'] * 2
             stock_dayt['total_amount_bought_dayt'] +=  (bought['unit_price'] * bought['qt'])
             stock_dayt['total_amount_sold_dayt'] += (sold['unit_price'] * sold['qt'])
@@ -877,6 +889,8 @@ class DayTrade():
                                                 stock_dayt['qt_remaining_operations']
 
 
+        stock_dayt['reconciled_operations'] = zip(stock_dayt['reconciled_bought_operations'],\
+                                                        stock_dayt['reconciled_sold_operations'])
         # print("stock_dayt['operations']")
         # print(stock_dayt['operations'])
         #
@@ -890,6 +904,7 @@ class DayTrade():
         for day in self._has_dayts.keys():
             for stock in self._has_dayts[day]:
                 stock_dayt = self._has_dayts[day][stock]
+                stock_dayt['original_operations'] = copy.deepcopy(stock_dayt['operations'])
                 print('---')
                 print(day)
                 print(stock)
@@ -1060,6 +1075,12 @@ class Months():
                     # print(values[stock])
                     # print(self.this_month_obj ['dayt_summary'])
 
+
+
+        self.this_month_obj ['dayt_summary']['b3_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['b3_taxes']), 2)
+        self.this_month_obj ['dayt_summary']['broker_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['broker_taxes']), 2)
+        self.this_month_obj ['dayt_summary']['irpf_withholding'] = round(Decimal(self.this_month_obj ['dayt_summary']['irpf_withholding']), 2)
+
         balance_current_month = self.this_month_obj ['dayt_summary']['total_amount_sold_dayt'] -\
                                     self.this_month_obj ['dayt_summary']['total_amount_bought_dayt']
 
@@ -1073,11 +1094,9 @@ class Months():
             self.finance_result(self.this_month_obj ['dayt_summary'], None, balance_current_month, self.this_month_obj ['dayt_summary']['sum_taxes']  )
 
 
-        print(self.this_month_obj ['dayt_summary'])
-
-
-        # Incluir os impostos!!!!
         # import pdb; pdb.set_trace()
+        print('\n\ndayt_summary')
+        print(self.this_month_obj ['dayt_summary'])
 
 
     def month_add_detail(self):
