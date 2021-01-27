@@ -408,9 +408,12 @@ class ObjectifyData():
         if month: self.month_add_dayt(month, self.previous_day, self.dayt._has_dayts)
 
         # Cleanup daytrade objects
-        del self.dayt[self.previous_day]
-        del self.dayt._has_dayts[self.previous_day]
-
+        try:
+            del self.dayt[self.previous_day]
+            del self.dayt._has_dayts[self.previous_day]
+        except:
+            # History detail bugs here.
+            pass
 
     def verify_intraday(self, line):
         """
