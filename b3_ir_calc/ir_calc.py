@@ -191,6 +191,10 @@ class ObjectifyData():
                             continue
 
                         # For History stock detail
+                        """
+                        !!! AQUI acertar o daytrade para o detail.
+                        Checar a lista stock_detail_lst com self.dayt._has_dayts[self.previous_day].keys()
+                        """
                         if stock_detail is not None:
                             stock_detail_lst = [stock_detail]
                             if stock_detail in self.ce.dict_deconversion_events.keys():
@@ -199,8 +203,10 @@ class ObjectifyData():
                                 continue
 
 
-                        # if not 'ENBR3' in line['stock']:
-                        #      continue
+                        # if not 'SULA11' in line['stock'] and not 'SULA11' in self.dayt._has_dayts[self.previous_day].keys():
+                        #       continue
+
+
                         # # import pdb; pdb.set_trace()
                         #
                         # if line['year_month_id'] != 202004:
@@ -389,13 +395,18 @@ class ObjectifyData():
         Insert virtual orders remaining from daytrade.
         Why virtual orders? Because sometimes bought and sold orders on daytrade,
         doesnt match exact, and the rest return to the position wallet.
-
-        !!! This seems to be obsolete!!!
+        Once this virtual orders returns to wallet, it can matches against old,
+        or future orders.
         """
-        # for stock in self.dayt._has_dayts[self.previous_day].keys():
-        #     import pdb; pdb.set_trace()
-        #     self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought']
-        #     self.days[self.previous_day][stock] += self.dayt[self.previous_day][stock]['operations']['sold']
+        for stock in self.dayt._has_dayts[self.previous_day].keys():
+            self.days[self.previous_day][stock] = self.dayt[self.previous_day][stock]['operations']['bought'] + \
+                                                        self.dayt[self.previous_day][stock]['operations']['sold']
+            # print ("Bought: %s" % (str(self.dayt[self.previous_day][stock]['operations']['bought'])))
+            # print ("Sold: %s" % (str(self.dayt[self.previous_day][stock]['operations']['sold'])))
+        # print ('Previous_day: %s' % (str(self.days[self.previous_day])))
+        # import pdb; pdb.set_trace()
+
+
 
         """ Objectify stocks and add operations to month """
         for stock in self.days[self.previous_day]:
