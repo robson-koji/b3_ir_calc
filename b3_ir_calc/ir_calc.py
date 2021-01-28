@@ -191,24 +191,17 @@ class ObjectifyData():
                             continue
 
                         # For History stock detail
-                        """
-                        !!! AQUI acertar o daytrade para o detail.
-                        Checar a lista stock_detail_lst com self.dayt._has_dayts[self.previous_day].keys()
-                        """
                         if stock_detail is not None:
                             stock_detail_lst = [stock_detail]
+                            check_dayt =  any(item in stock_detail_lst for item in self.dayt._has_dayts[self.previous_day].keys())
                             if stock_detail in self.ce.dict_deconversion_events.keys():
                                 stock_detail_lst.append(self.ce.dict_deconversion_events[stock_detail])
-                            if not line['stock'] in stock_detail_lst:
+                            if not line['stock'] in stock_detail_lst and not check_dayt:
                                 continue
-
 
                         # if not 'SULA11' in line['stock'] and not 'SULA11' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
 
-
-                        # # import pdb; pdb.set_trace()
-                        #
                         # if line['year_month_id'] != 202004:
                         #     continue
 
