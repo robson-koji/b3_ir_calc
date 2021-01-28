@@ -67,7 +67,7 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None, corporate_events=None):
+    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None, corporate_events=None, get_dayt=False):
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
@@ -81,6 +81,7 @@ class ObjectifyData():
         self.broker_taxes_def = broker_taxes
         self.previous_day = None
         self.days =  defaultdict(lambda: defaultdict(list))
+        self.get_dayt = get_dayt
         #self.has_dayt =  defaultdict(lambda: defaultdict(lambda: defaultdict()))
         self.has_dayt =  defaultdict(lambda: defaultdict(lambda: {'has_sold':False, 'has_bought':False}))
         self.dayt = DayTrade(self.mkt_type)
@@ -381,7 +382,8 @@ class ObjectifyData():
                 self.days[self.previous_day].pop(stock)
 
         """ Daytrade reconciliation """
-        self.dayt.dayt_consolidate_day()
+        if self.get_dayt:
+            self.dayt.dayt_consolidate_day()
 
         """
         Insert virtual orders remaining from daytrade.
@@ -1057,8 +1059,8 @@ class Months():
 
 
     def summarize_daytrading_operations(self):
-        print('\n\n')
-        print('summarze_daytrading_operations')
+        # print('\n\n')
+        # print('summarze_daytrading_operations')
         for day, values in self.this_month_obj ['dayt'].items():
             print(day)
             for stock in values:
@@ -1098,11 +1100,11 @@ class Months():
 
 
         # import pdb; pdb.set_trace()
-        print('\n\ndayt_summary')
-        print(self.this_month_obj ['dayt_summary'])
+        # print('\n\ndayt_summary')
+        # print(self.this_month_obj ['dayt_summary'])
 
 
-    def month_add_detail(self):
+    def month_add_detail(self, get_dayt=False):
         """
         Add gain, loss for all months.
         Calculate final balance and due tax.
@@ -1127,7 +1129,8 @@ class Months():
             # Always have to summarize,
             # to get former month cumulate loss if exists.
             self.summarize_regular_operations()
-            self.summarize_daytrading_operations()
+            if get_dayt:
+                self.summarize_daytrading_operations()
 
 
 
