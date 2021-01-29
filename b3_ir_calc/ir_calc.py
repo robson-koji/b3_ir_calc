@@ -199,7 +199,7 @@ class ObjectifyData():
                             if not line['stock'] in stock_detail_lst and not check_dayt:
                                 continue
 
-                        # if not 'SULA11' in line['stock'] and not 'SULA11' in self.dayt._has_dayts[self.previous_day].keys():
+                        # if not 'BOVA11' in line['stock'] and not 'BOVA11' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
 
                         # if line['year_month_id'] != 202004:
@@ -264,6 +264,7 @@ class ObjectifyData():
         # After the last operation, insert last not insert day on month
         self.previous_day = line['dt']
         #self.objectify_months(stock_updated_instance.dt)
+        # import pdb; pdb.set_trace()
         self.reconcile_day()
 
 
@@ -402,6 +403,8 @@ class ObjectifyData():
 
 
         """ Objectify stocks and add operations to month """
+        # import pdb; pdb.set_trace()
+
         for stock in self.days[self.previous_day]:
             for line in self.days[self.previous_day][stock]:
                 stock_updated_instance = self.objectify_stock(line)
@@ -421,6 +424,18 @@ class ObjectifyData():
             # History detail bugs here.
             pass
 
+        # Cleanup regular trades object
+        del self.days[self.previous_day]
+
+        remaining_days = list(self.days)
+        if remaining_days:
+            for rd in remaining_days:
+                self.previous_day = rd
+                self.reconcile_day()
+
+
+
+
     def verify_intraday(self, line):
         """
         Group stocks by day, check daytrade, objectify stocks and send to month.
@@ -436,6 +451,9 @@ class ObjectifyData():
 
         """ Populate day data structure """
         self.days[date][stock].append(line)
+
+        # print(date)
+        # print(self.previous_day)
 
         """ Day has changed. Reconcile day. """
         if self.previous_day is not None and date != self.previous_day:
@@ -656,18 +674,12 @@ class StockCheckingAccount():
 
 
     def new_avg_price(self, qt, unit_price):
-        current_position = self.qt_total * self.avg_price
+        # import pdb; pdb.set_trace()
+        current_position = abs(self.qt_total) * self.avg_price
         new_dock = qt * unit_price
-        new_avg_price = (current_position + new_dock) / (self.qt_total + qt)
+        new_avg_price = (current_position + new_dock) / (abs(self.qt_total) + qt)
         self.avg_price_prev = self.avg_price
         self.avg_price = new_avg_price
-
-
-    def profit_loss(self, qt, unit_price):
-        if unit_price <= self.avg_price:
-            self.loss += (qt * self.avg_price) - (qt * unit_price)
-        elif unit_price >= self.avg_price:
-            self.profit += (qt * unit_price) - (qt * self.avg_price)
 
     def start_operation(self, **kwargs):
         # Pass all csv line values to stockCheckingAccount instance
@@ -685,34 +697,55 @@ class StockCheckingAccount():
         self.mkt_position = round(Decimal(self.qt_total * line['unit_price']), 2)
         self.unit_price = line['unit_price']
 
+
+    def profit_loss(self, oper, qt, unit_price):
+        if abs(qt) > abs(self.qt_total):
+            qt = abs(self.qt_total)
+
+        if oper == 'short':
+            if unit_price <= self.avg_price:
+                self.profit += (qt * unit_price) - (qt * self.avg_price)
+            elif unit_price >= self.avg_price:
+                self.loss += (qt * self.avg_price) - (qt * unit_price)
+        else:
+            if unit_price <= self.avg_price:
+                self.loss += (qt * self.avg_price) - (qt * unit_price)
+            elif unit_price >= self.avg_price:
+                self.profit += (qt * unit_price) - (qt * self.avg_price)
+
+        self.loss = abs(self.loss)
+        self.profit = abs(self.profit)
+
     def buy(self, **line):
-        self.new_avg_price(line['qt'], line['unit_price'])
+        # Regular operation
+        if self.qt_total >= 0:
+            self.new_avg_price(line['qt'], line['unit_price'])
+        # Short selling
+        else:
+            self.profit_loss('short', line['qt'], line['unit_price'])
+
         self.qt_total_prev = self.qt_total
         self.qt_total += line['qt']
 
+
     def sell(self, **line):
-        self.profit_loss(line['qt'], line['unit_price'])
-        if line['qt'] > self.qt_total:
-            # import pdb; pdb.set_trace()
-            raise InsufficientStocks()
+        # Regular operation
+        if self.qt_total >= line['qt']:
+            self.profit_loss('regular', line['qt'], line['unit_price'])
+            # if line['qt'] > self.qt_total:
+            #     # import pdb; pdb.set_trace()
+            #     raise InsufficientStocks()
+
+        # Short selling
+        else:
+            self.new_avg_price(line['qt'], line['unit_price'])
+
         self.qt_total -= line['qt']
         if self.qt_total == 0:
             self.qt_total_prev = 0
             self.avg_price_prev = 0
             self.avg_price = 0
 
-
-    # def calculate_b3_taxes(self, b3_taxes_def, type, **line):
-    #     # b3_taxes_def - callback function
-    #     b3_taxes_factor = b3_taxes_def(type, line['dt'])
-    #     self.b3_taxes = line['value'] * b3_taxes_factor
-    #
-    # def calculate_broker_taxes(self, broker_taxes_def, **line):
-    #     broker_taxes_fees = broker_taxes_def(line['dt'])
-    #     self.broker_taxes = broker_taxes_fees.stock_brokering + broker_taxes_fees.stock_iss
-    #
-    # def calculate_irpf_withholding(self, **line):
-    #     self.irpf_withholding = line['value'] * Decimal(0.00005)
 
     def update_event(self, stock_event):
         """
@@ -1042,12 +1075,18 @@ class Months():
             for operation in values:
                 if operation.buy_sell == 'V':
                     self.this_month_obj ['qt_sell'] += 1
-                    if operation.profit:
-                        balance_current_month += operation.profit
-                    elif operation.loss:
-                        balance_current_month -= operation.loss
+                    # if operation.profit:
+                    #     balance_current_month += operation.profit
+                    # elif operation.loss:
+                    #     balance_current_month -= operation.loss
                 else:
                     self.this_month_obj ['qt_buy'] += 1
+
+                if operation.profit:
+                    balance_current_month += operation.profit
+                elif operation.loss:
+                    balance_current_month -= operation.loss
+
                 self.this_month_obj ['b3_taxes'] += operation.b3_taxes
                 self.this_month_obj ['broker_taxes'] += operation.broker_taxes
                 self.this_month_obj ['irpf_withholding'] += operation.irpf_withholding
