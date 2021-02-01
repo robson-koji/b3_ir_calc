@@ -199,7 +199,7 @@ class ObjectifyData():
                             if not line['stock'] in stock_detail_lst and not check_dayt:
                                 continue
 
-                        # if not 'BOVA11' in line['stock'] and not 'BOVA11' in self.dayt._has_dayts[self.previous_day].keys():
+                        # if not 'HAPV3' in line['stock'] and not 'HAPV3' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
 
                         # if line['year_month_id'] != 202004:
@@ -315,7 +315,9 @@ class ObjectifyData():
                         # deep copy operation values to stock_wallet.
                         # This is for corporative events.
                         # objectify_stock() calls it too. It is ok to call twice.
-                        cp_stock = copy.deepcopy(update_stock.__dict__)
+                        # !!! changed from .__dict__ to object. Hope this is ok.
+                        #cp_stock = copy.deepcopy(update_stock.__dict__)
+                        cp_stock = copy.deepcopy(update_stock)
                         self.stocks_wallet[stock[0].name] = cp_stock
 
 
@@ -338,9 +340,13 @@ class ObjectifyData():
         For each line, create/update the object which returns the object __dict__
         """
 
+
         self.apply_event(line['dt'])
 
+
         stock = self.stocks.setdefault(line['stock'], StockCheckingAccount(line['stock']))
+
+
 
         # Set operation attributes
         stock.start_operation(**line)
@@ -646,6 +652,9 @@ class StockCheckingAccount():
         self.b3_taxes =  Decimal()
         self.broker_taxes =  Decimal()
         self.irpf_withholding = 0
+        self.profit = 0
+        self.loss = 0
+        self.dt = date
 
 
     @property
@@ -779,8 +788,8 @@ class StockCheckingAccount():
         return None
 
     def __repr__(self):
-        return 'name:{}, dt:{}, qt: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
-                    .format(self.name, self.dt, self.qt_total, self.avg_price, self.profit, self.loss)
+        return 'name:{}, dt:{}, qt_total: {}, avg_price: {}, lucro:{}, prejuizo:{}'\
+            .format(self.name, self.dt, self.qt_total, self.avg_price, self.profit, self.loss)
 
 
 
