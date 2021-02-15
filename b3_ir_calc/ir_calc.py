@@ -67,7 +67,7 @@ class ObjectifyData():
     """
     Opens CSV file and objetify to a sequence of months and a list of stocks
     """
-    def __init__(self, mkt_type, file, path="files/", broker_taxes=None, b3_taxes=None, corporate_events=None, get_dayt=False):
+    def __init__(self, mkt_type, file, ignore_taxes, path="files/", broker_taxes=None, b3_taxes=None, corporate_events=None, get_dayt=False):
         self.mkt_type = mkt_type
         self.file_path = path
         self.file = file
@@ -86,6 +86,7 @@ class ObjectifyData():
         self.has_dayt =  defaultdict(lambda: defaultdict(lambda: {'has_sold':False, 'has_bought':False}))
         self.dayt = DayTrade(self.mkt_type)
         self.taxes = Taxes()
+        self.ignore_taxes = ignore_taxes
 
         file_path = '%s%s' % (self.file_path, self.file)
         if not os.path.exists(file_path):
@@ -365,9 +366,10 @@ class ObjectifyData():
                 self.illegal_operation[line['stock']].append(line)
                 return None
 
-        stock.b3_taxes = self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'regular', line['dt'],  line['value'])
-        stock.broker_taxes = self.taxes.calculate_broker_taxes(self.broker_taxes_def, line['dt'])
-        stock.irpf_withholding = self.taxes.calculate_irpf_withholding('regular', line['value'])
+        if not self.ignore_taxes:
+            stock.b3_taxes = self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'regular', line['dt'],  line['value'])
+            stock.broker_taxes = self.taxes.calculate_broker_taxes(self.broker_taxes_def, line['dt'])
+            stock.irpf_withholding = self.taxes.calculate_irpf_withholding('regular', line['value'])
 
         cp_stock = copy.deepcopy(stock)
         self.stocks_wallet[cp_stock.stock] = cp_stock
@@ -970,6 +972,7 @@ class Months():
         self.taxes = Taxes()
         self.broker_taxes_def = broker_taxes
         self.b3_taxes_def = b3_taxes
+        self.ignore_taxes = False
 
     def __getitem__(self, month):
         # stocks = {'operations':[], 'totalization':{}}
@@ -1125,25 +1128,28 @@ class Months():
                 # # For each stock, calc taxes
                 dayt_sum_value_operations =  values[stock]['total_amount_bought_dayt'] + \
                                                     values[stock]['total_amount_sold_dayt']
-                self.this_month_obj ['dayt_summary']['b3_taxes'] += self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'daytrade', day, dayt_sum_value_operations)
-                self.this_month_obj ['dayt_summary']['broker_taxes'] += self.taxes.calculate_broker_taxes(self.broker_taxes_def, day)
-                if values[stock]['operation_result'] > 0:
-                    self.this_month_obj ['dayt_summary']['irpf_withholding'] += self.taxes.calculate_irpf_withholding('daytrade', values[stock]['operation_result'])
-                    # print(values[stock])
-                    # print(self.this_month_obj ['dayt_summary'])
+
+                if not self.ignore_taxes:
+                    self.this_month_obj ['dayt_summary']['b3_taxes'] += self.taxes.calculate_b3_taxes(self.b3_taxes_def, 'daytrade', day, dayt_sum_value_operations)
+                    self.this_month_obj ['dayt_summary']['broker_taxes'] += self.taxes.calculate_broker_taxes(self.broker_taxes_def, day)
+                    if values[stock]['operation_result'] > 0:
+                        self.this_month_obj ['dayt_summary']['irpf_withholding'] += self.taxes.calculate_irpf_withholding('daytrade', values[stock]['operation_result'])
+                        # print(values[stock])
+                        # print(self.this_month_obj ['dayt_summary'])
 
 
+        if not self.ignore_taxes:
+            self.this_month_obj ['dayt_summary']['b3_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['b3_taxes']), 2)
+            self.this_month_obj ['dayt_summary']['broker_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['broker_taxes']), 2)
+            self.this_month_obj ['dayt_summary']['irpf_withholding'] = round(Decimal(self.this_month_obj ['dayt_summary']['irpf_withholding']), 2)
 
-        self.this_month_obj ['dayt_summary']['b3_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['b3_taxes']), 2)
-        self.this_month_obj ['dayt_summary']['broker_taxes'] = round(Decimal(self.this_month_obj ['dayt_summary']['broker_taxes']), 2)
-        self.this_month_obj ['dayt_summary']['irpf_withholding'] = round(Decimal(self.this_month_obj ['dayt_summary']['irpf_withholding']), 2)
+        if not self.ignore_taxes:
+            self.this_month_obj ['dayt_summary']['sum_taxes'] = self.this_month_obj ['dayt_summary']['b3_taxes'] +\
+                                                self.this_month_obj ['dayt_summary']['broker_taxes'] +\
+                                                        self.this_month_obj ['dayt_summary']['irpf_withholding']
 
         balance_current_month = self.this_month_obj ['dayt_summary']['total_amount_sold_dayt'] -\
                                     self.this_month_obj ['dayt_summary']['total_amount_bought_dayt']
-
-        self.this_month_obj ['dayt_summary']['sum_taxes'] = self.this_month_obj ['dayt_summary']['b3_taxes'] +\
-                                                self.this_month_obj ['dayt_summary']['broker_taxes'] +\
-                                                        self.this_month_obj ['dayt_summary']['irpf_withholding']
 
         if self.previous_month_obj:
             self.finance_result(self.this_month_obj ['dayt_summary'], self.previous_month_obj ['dayt_summary'], balance_current_month, self.this_month_obj ['dayt_summary']['sum_taxes']  )
@@ -1156,11 +1162,12 @@ class Months():
         # print(self.this_month_obj ['dayt_summary'])
 
 
-    def month_add_detail(self, get_dayt=False):
+    def month_add_detail(self, get_dayt=False, ignore_taxes=False):
         """
         Add gain, loss for all months.
         Calculate final balance and due tax.
         """
+        self.ignore_taxes = ignore_taxes
 
         # import pdb; pdb.set_trace()
         for month in self.keys():
