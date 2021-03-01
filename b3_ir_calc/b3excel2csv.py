@@ -8,28 +8,44 @@ import csv, xlrd
 from django.conf import settings
 
 
+def get_broker_client(empDfObj):
+    cod_broker = False
+    for index, row in empDfObj.iterrows():
+        try:
+            if row[7] == 'Participante de Negociação / Cliente':
+                cod_broker = True
+                continue
+            elif cod_broker:
+                return row[7].split(' - ')
+        except:
+            raise
+
+
 def excel_to_csv(path, file):
     try:
         #file_path_excel = "/home/robson/Downloads/InfoCEI (17).xls"
         if path:
             path = path.replace('/media/', '')
             path = "%s%s" % (settings.MEDIA_ROOT, path)
-
-            #file_path_excel = "%s/%s" % (path, file)
         else:
             path = settings.MEDIA_ROOT
 
         file_path_excel = "%s/%s" % (path, file)
-
         file_path_csv = "%s/%s" % (path, file.replace('.xls', '.csv'))
-
-        # import pdb; pdb.set_trace()
 
         wb = xlrd.open_workbook(file_path_excel, logfile=open(devnull, 'w'))
         empDfObj = pd.read_excel(wb, engine='xlrd')
 
-        df2 = pd.DataFrame()
+        try:
+            (broker, client) = get_broker_client(empDfObj)
+        except:
+            raise
 
+        df = pd.DataFrame()
+        df = df.append({0:broker, 1:client}, ignore_index=True)
+        df = df.append({}, ignore_index=True)
+
+        df2 = pd.DataFrame()
         data_table = False
         for index, row in empDfObj.iterrows():
             # Identify table data header
@@ -76,8 +92,9 @@ def excel_to_csv(path, file):
 
         # Reverse order
         df2 = df2[::-1]
+
+        df = df.append(df2)
         # import pdb; pdb.set_trace()
-        df2.to_csv(file_path_csv, header=False, index=False, encoding='utf-8') #, quoting=csv.QUOTE_ALL)
+        df.to_csv(file_path_csv, header=False, index=False, encoding='utf-8') #, quoting=csv.QUOTE_ALL)
     except Exception as e:
-        print(e)
-        import pdb; pdb.set_trace()
+        raise

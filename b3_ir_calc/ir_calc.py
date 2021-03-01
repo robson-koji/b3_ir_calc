@@ -184,12 +184,17 @@ class ObjectifyData():
                 if csv_only:
                     return csv_reader
 
+                line = None
                 while True:
                     try:
+                        prev = line
                         line = next(csv_reader)
+                        if not line[4]:
+                            line = prev
+                            break
+
                         line = self.read_line(line)
-                        if not line:
-                            continue
+                        if not line: continue
 
                         # For History stock detail
                         if stock_detail is not None:
@@ -261,9 +266,12 @@ class ObjectifyData():
         updated_options = self.running_options.chk_running_options(None)
         self.months_update_option(updated_options)
 
-
+        try:
         # After the last operation, insert last not insert day on month
-        self.previous_day = line['dt']
+            self.previous_day = line['dt']
+        except:
+            pass
+            import pdb; pdb.set_trace()
         #self.objectify_months(stock_updated_instance.dt)
         # import pdb; pdb.set_trace()
         self.reconcile_day()
