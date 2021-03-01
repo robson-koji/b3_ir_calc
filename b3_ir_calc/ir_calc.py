@@ -1304,9 +1304,18 @@ class Report():
                     raise StockNotFound
 
                 curr_position = values.qt_total * round(Decimal(current_price['price']), 2)
+
+
                 balance = curr_position - buy_position
                 balance_pct = round((balance * 100 / buy_position), 2)
-                # import pdb; pdb.set_trace()
+
+                if values.qt_total < 0:
+                #     balance *= -1
+                    balance_pct *= -1
+                #
+                # if stock == 'BRFS3':
+                #     import pdb; pdb.set_trace()
+
                 return (stock, values, Decimal(buy_position), Decimal(curr_position), Decimal(balance), balance_pct)
             except KeyError as e:
                 # If KeyError 'avg_price', means that no buy input was provided.
@@ -1335,7 +1344,6 @@ class Report():
                     summary['buy_total'] += buy_position
                     summary['cur_total'] += curr_position
 
-                    # import pdb; pdb.set_trace()
 
                 except StockNotFound:
                     values.exception = StockNotFound('%s: StockNotFound (%s)'  % (values.stock, values.dt))
