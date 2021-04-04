@@ -196,24 +196,17 @@ class ObjectifyData():
                         line = self.read_line(line)
                         if not line: continue
 
-                        # For History stock detail
+                        """
+                        For History stock detail
+                        Maybe, not working for stock detail for dayt
+                        """
                         if stock_detail is not None:
                             stock_detail_lst = [stock_detail]
-                            check_dayt =  any(item in stock_detail_lst for item in self.dayt._has_dayts[self.previous_day].keys())
+                            #check_dayt =  any(item in stock_detail_lst for item in self.dayt._has_dayts[self.previous_day].keys())
                             if stock_detail in self.ce.dict_deconversion_events.keys():
                                 stock_detail_lst.append(self.ce.dict_deconversion_events[stock_detail])
-                            if not line['stock'] in stock_detail_lst and not check_dayt:
+                            if not line['stock'] in stock_detail_lst:# and not check_dayt:
                                 continue
-
-                        """
-                        Precisa passar abaixo, acho que para dayt, porem da pau em regular trade.
-                        !!! Dando pau aqui na pg detail. ex: bbas3
-                        if stock_detail != line['stock']
-                            import pdb; pdb.set_trace()
-                        """
-
-                        if stock_detail and stock_detail != line['stock']:
-                            continue
 
                         # if not 'HAPV3' in line['stock'] and not 'HAPV3' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
