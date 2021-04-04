@@ -212,6 +212,8 @@ class ObjectifyData():
                             import pdb; pdb.set_trace()
                         """
 
+                        if stock_detail and stock_detail != line['stock']:
+                            continue
 
                         # if not 'HAPV3' in line['stock'] and not 'HAPV3' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
@@ -367,7 +369,8 @@ class ObjectifyData():
 
         # Set operation attributes
         stock.start_operation(**line)
-        stock.calculate_position(**line)
+        #stock.calculate_position(**line)
+        stock.calculate_position()
 
         # Calculate and set instance values
         if line['buy_sell'] == 'C':
@@ -715,13 +718,14 @@ class StockCheckingAccount():
         self.profit = 0
         self.loss = 0
 
-    def calculate_position(self, **line):
+    def calculate_position(self):
+        # import pdb; pdb.set_trace()
         if self.qt_total > 0:
             self.my_position = round(Decimal(self.qt_total * self.avg_price), 2)
         else:
             self.my_position = 0
-        self.mkt_position = round(Decimal(self.qt_total * line['unit_price']), 2)
-        self.unit_price = line['unit_price']
+        self.mkt_position = round(Decimal(self.qt_total * self.unit_price), 2)
+
 
 
     def profit_loss(self, oper, qt, unit_price):
