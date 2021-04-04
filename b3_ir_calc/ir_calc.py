@@ -205,6 +205,14 @@ class ObjectifyData():
                             if not line['stock'] in stock_detail_lst and not check_dayt:
                                 continue
 
+                        """
+                        Precisa passar abaixo, acho que para dayt, porem da pau em regular trade.
+                        !!! Dando pau aqui na pg detail. ex: bbas3
+                        if stock_detail != line['stock']
+                            import pdb; pdb.set_trace()
+                        """
+
+
                         # if not 'HAPV3' in line['stock'] and not 'HAPV3' in self.dayt._has_dayts[self.previous_day].keys():
                         #       continue
 
@@ -693,7 +701,6 @@ class StockCheckingAccount():
 
 
     def new_avg_price(self, qt, unit_price):
-        # import pdb; pdb.set_trace()
         current_position = abs(self.qt_total) * self.avg_price
         new_dock = qt * unit_price
         new_avg_price = (current_position + new_dock) / (abs(self.qt_total) + qt)
@@ -785,11 +792,11 @@ class StockCheckingAccount():
             # self.unit_price = Decimal(self.unit_price/int(stock_event['qtt_operation']))
 
         elif stock_event['event'] == 'bonificacao':
+            position = self.qt_total * self.avg_price
             self.qt_total = int(self.operators[stock_event['operator']](
                                 self.qt_total, Decimal(stock_event['qtt_operation'])))
+            self.avg_price = position / self.qt_total
 
-            self.avg_price = self.value / self.qt_total
-            # import pdb; pdb.set_trace()
 
         if stock_event['asset_code_new']:
              self.stock = self.name = stock_event['asset_code_new']
