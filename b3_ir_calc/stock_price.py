@@ -39,7 +39,7 @@ def get_stocks():
 
     stocks = set()
     for filename in glob.iglob(csvs_path + '**/*.csv', recursive=True):
-        print(filename)
+        # print(filename)
 
         with open(filename) as file_handler:
             csv_reader = csv.reader(file_handler, quotechar='"', delimiter=',')
