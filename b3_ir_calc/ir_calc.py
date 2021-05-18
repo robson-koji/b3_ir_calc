@@ -105,7 +105,8 @@ class ObjectifyData():
         # line = [10/07/2019,1-Bovespa,C,VIS,TAEE11 UNT N2,,100,"28,69",2869,D]
         line_dict = {}
         try:
-            if self.mkt_type != line[3]:
+            if self.mkt_type != line[3]:                
+                print(line)
                 return
 
             # Column 10 filed, to ignore.
@@ -970,9 +971,9 @@ class DayTrade():
             for stock in self._has_dayts[day]:
                 stock_dayt = self._has_dayts[day][stock]
                 stock_dayt['original_operations'] = copy.deepcopy(stock_dayt['operations'])
-                print('---')
-                print(day)
-                print(stock)
+                # print('---')
+                # print(day)
+                # print(stock)
                 self.dayt_consolidate_by_stock(stock_dayt)
 
 
@@ -1129,9 +1130,9 @@ class Months():
         # print('\n\n')
         # print('summarze_daytrading_operations')
         for day, values in self.this_month_obj ['dayt'].items():
-            print(day)
+            # print(day)
             for stock in values:
-                print(stock)
+                # print(stock)
                 # print(values[stock])
                 self.this_month_obj ['dayt_summary']['total_amount_bought_dayt'] += values[stock]['total_amount_bought_dayt']
                 self.this_month_obj ['dayt_summary']['total_amount_sold_dayt'] += values[stock]['total_amount_sold_dayt']
