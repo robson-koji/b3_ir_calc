@@ -1,10 +1,14 @@
-# b3_ir_calc
-Calculte income tax for B3(BM&FBOVESPA) stocks and options operations. 
+# B3IRCalc
+Calculation of income tax for operations of purchase and sale of assets on the Brazilian stock exchange, B3.
 
 For options, it calculates only buy and sell operations. It doesn't calculates income tax for options that were exercised.
 
 
-To be a Python module for application. Still a standalone script.
+## Warning
+A system like this is very, very, very complex. So There is no level of warranty that there is no error. This is much more for personal use. 
+
+It is to be a Python module for application. Still a standalone script.
+
 
 ## Clone
 git clone https://gitlab.com/robson.koji/b3_ir_calc.git
