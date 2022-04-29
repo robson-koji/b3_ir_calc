@@ -7,8 +7,12 @@ For options, it calculates only buy and sell operations. It doesn't calculates i
 ## Warning
 A system like this is very, very, very complex. So There is no level of warranty that there is no error. This is much more for personal use. 
 
+It is used as the core module of this web app [https://b3ircalc.online/](https://github.com/robson-koji/django_b3_ir_calc), also for personal use.
+
 It is to be a Python module for application. Still a standalone script.
 
+## B3 CEI File
+on 2021 B3 changed CEI file format, so now the system uses the SINACOR format.
 
 ## Clone
 git clone https://gitlab.com/robson.koji/b3_ir_calc.git
